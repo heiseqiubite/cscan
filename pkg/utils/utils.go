@@ -77,6 +77,7 @@ func RandomInt(min, max int) int {
 
 // IsSubdomain 判断是否为子域名（非根域名）
 // 例如: api.example.com 返回 true, example.com 返回 false
+// 使用 publicsuffix 正确处理多级TLD（如 .com.cn, .co.uk 等）
 func IsSubdomain(domain string) bool {
 	// 移除可能的协议前缀
 	domain = strings.TrimPrefix(domain, "http://")
@@ -97,9 +98,10 @@ func IsSubdomain(domain string) bool {
 		return false
 	}
 
-	parts := strings.Split(domain, ".")
-	// 子域名至少有3个部分（如 sub.example.com）
-	return len(parts) > 2
+	// 使用 GetRootDomain 基于 publicsuffix 正确判断
+	// 如果域名等于其根域名，则不是子域名
+	rootDomain := GetRootDomain(domain)
+	return strings.ToLower(domain) != rootDomain
 }
 
 // ParseTargetInfo 解析目标信息

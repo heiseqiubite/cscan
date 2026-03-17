@@ -24,12 +24,6 @@
 
 **Platform Capabilities**: Distributed Architecture · Multi-Workspace · Report Export · Audit Log
 
-## 🌐 Live Demo
-
-**Demo URL**: [http://cscan.txf7.cn](http://cscan.txf7.cn)
-
-> Demo environment is for experience only, please do not use for actual scanning tasks
-
 ## Quick Start
 
 ```bash
@@ -46,82 +40,6 @@ chmod +x cscan.sh && ./cscan.sh
 Access `https://ip:3443`, default account `admin / 123456`
 
 > ⚠️ Worker nodes must be deployed before executing scans
-
-## Architecture
-
-```
-+--------------------------------------------------------------------------+
-|                            CSCAN Architecture                            |
-+--------------------------------------------------------------------------+
-|                                                                          |
-|  +----------------+                                                      |
-|  |  Browser/User  |                                                      |
-|  |  (Vue3 SPA)    |                                                      |
-|  +-------+--------+                                                      |
-|          | HTTPS (:3443)                                                 |
-|          v                                                               |
-|  +--------------------------------------------------------------------+  |
-|  |                      API Service (Go-Zero)                         |  |
-|  |                          Port: 8888                                |  |
-|  |  +--------------------------------------------------------------+  |  |
-|  |  | Routes:                                                      |  |  |
-|  |  | - Public: /api/v1/login, /api/v1/worker/download             |  |  |
-|  |  | - Worker: /api/v1/worker/* (Install Key Auth)                |  |  |
-|  |  | - Auth: /api/v1/* (JWT Auth)                                 |  |  |
-|  |  | - Console: /api/v1/worker/console/* (JWT + Admin)            |  |  |
-|  |  +--------------------------------------------------------------+  |  |
-|  +-----------+-----------------+--------------------------------------+  |
-|              |                 |                                         |
-|         RPC (:9000)         MongoDB                                      |
-|              |                 |                                         |
-|  +-----------v-------+  +------v------+  +-------------+                 |
-|  |    RPC Service    |  |   MongoDB   |  |    Redis    |                 |
-|  |  (Task Scheduler) |  |   (cscan)   |  |   (:6379)   |                 |
-|  +-------------------+  +-------------+  +------+------+                 |
-|                                                 |                        |
-|              +----------------------------------+                         |
-|              | Pub/Sub & State Sync                                      |
-|              v                                                           |
-|  +--------------------------------------------------------------------+  |
-|  |                   Worker Cluster (Distributed Scan)                |  |
-|  |  +--------------+  +--------------+  +--------------+              |  |
-|  |  |   Worker 1   |  |   Worker 2   |  |   Worker N   | <- Scale Out |  |
-|  |  |              |  |              |  |              |              |  |
-|  |  | - Port Scan  |  | - Vuln Scan  |  | - Fingerprint|              |  |
-|  |  | - WebSocket  |  | - File Mgmt  |  | - Terminal   |              |  |
-|  |  +--------------+  +--------------+  +--------------+              |  |
-|  +--------------------------------------------------------------------+  |
-|                                                                          |
-+--------------------------------------------------------------------------+
-```
-
-## Feature Heatmap
-
-```
-+------------------------------------------------------------------------------+
-|                            CSCAN Feature Heatmap                             |
-+------------------------------------------------------------------------------+
-|                                                                              |
-|  Module                       | Priority | Heatmap                           |
-| ---------------------------------------------------------------------------- |
-|  Nuclei Vuln Scan             | CRITICAL | ████████████████████████████████  |
-|  Port Scan (Naabu/Masscan)    | CRITICAL | ████████████████████████████████  |
-|  Worker Distributed Node      | CRITICAL | ████████████████████████████      |
-|  Fingerprint (Httpx/Wapp)     | HIGH     | ████████████████████████          |
-|  Subdomain Enum (Subfinder)   | HIGH     | ████████████████████████          |
-|  Task Scheduler (RPC)         | HIGH     | ████████████████████              |
-|  Online API (FOFA/Hunter)     | HIGH     | ████████████████████              |
-|  URL Discovery (Urlfinder)    | MEDIUM   | ████████████████                  |
-|  Web Screenshot (Chromedp)    | MEDIUM   | ████████████████                  |
-|  POC Template Management      | MEDIUM   | ████████████                      |
-|  Report Export                | LOW      | ████████                          |
-|  Audit Log                    | LOW      | ████████                          |
-| ---------------------------------------------------------------------------- |
-|                                                                              |
-|  Legend: ████ Feature Priority / Usage Frequency                             |
-|                                                                              |
-+------------------------------------------------------------------------------+
-```
 
 ## Project Structure
 
