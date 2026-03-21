@@ -8,3 +8,5 @@ output/
 screenshot/
 .kiro/
 .env
+docs/
+.claude/
