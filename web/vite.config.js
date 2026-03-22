@@ -67,6 +67,15 @@ export default defineConfig({
         changeOrigin: true,
         ws: true, // 启用 WebSocket 代理
         configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            if (err.code === 'ECONNREFUSED') {
+              console.log(`[vite] 代理连接失败: ${req.url} (后端服务未启动或正在启动...)`)
+              if (!res.headersSent) {
+                res.writeHead(502, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ code: 502, msg: '后端网络未连接或服务未启动' }))
+              }
+            }
+          })
           proxy.on('proxyReq', (proxyReq, req, res) => {
             // SSE请求需要禁用缓冲
             if (req.url.includes('/worker/logs/stream')) {

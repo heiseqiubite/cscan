@@ -53,7 +53,21 @@ request.interceptors.response.use(
       router.push('/login')
       ElMessage.error('登录已过期，请重新登录')
     } else {
-      ElMessage.error(error.message || '请求失败')
+      // 优化网络错误和后端未启动时的弹窗提示
+      const errorMsg = error.message || '请求失败'
+      if (errorMsg === 'Network Error' || error.code === 'ECONNABORTED' || errorMsg.includes('timeout')) {
+        ElMessage({
+          message: '网络错误或后端服务未启动，请检查连接',
+          type: 'error',
+          grouping: true
+        })
+      } else {
+        ElMessage({
+          message: errorMsg,
+          type: 'error',
+          grouping: true
+        })
+      }
     }
     return Promise.reject(error)
   }
