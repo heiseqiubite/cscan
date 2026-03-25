@@ -4,8 +4,63 @@
     <div class="pro-table-toolbar">
       <div class="toolbar-left">
         <slot name="toolbar-left"></slot>
+        <!-- Inline stats -->
+        <template v-if="statApi && Object.keys(stats).length > 0">
+          <el-tag
+            v-for="(label, key) in statLabels"
+            :key="key"
+            type="info"
+            effect="plain"
+            class="stat-tag"
+          >
+            {{ label }}: <span class="stat-value">{{ stats[key] !== undefined ? stats[key] : 0 }}</span>
+          </el-tag>
+        </template>
       </div>
       <div class="toolbar-right">
+        <!-- Advanced search -->
+        <el-popover
+          v-if="searchItems && searchItems.length > 0"
+          placement="bottom-end"
+          :width="300"
+          trigger="click"
+        >
+          <template #reference>
+            <el-button icon="Filter">Advanced Search</el-button>
+          </template>
+          <el-form :model="searchForm" label-position="top" size="small">
+            <el-form-item
+              v-for="item in searchItems"
+              :key="item.prop"
+              :label="item.label"
+            >
+              <el-input
+                v-if="item.type === 'input'"
+                v-model="searchForm[item.prop]"
+                :placeholder="`Enter ${item.label}`"
+                clearable
+              />
+              <el-select
+                v-else-if="item.type === 'select'"
+                v-model="searchForm[item.prop]"
+                :placeholder="`Select ${item.label}`"
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="opt in item.options"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
+            </el-form-item>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+              <el-button @click="resetSearch">Reset</el-button>
+              <el-button type="primary" @click="handleSearch">Search</el-button>
+            </div>
+          </el-form>
+        </el-popover>
         <slot name="toolbar-right"></slot>
       </div>
     </div>
@@ -64,6 +119,18 @@ const props = defineProps({
   columns: {
     type: Array,
     default: () => []
+  },
+  statApi: {
+    type: String,
+    default: ''
+  },
+  statLabels: {
+    type: Object,
+    default: () => ({})
+  },
+  searchItems: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -73,6 +140,7 @@ const route = useRoute()
 // State
 const loading = ref(false)
 const tableData = ref([])
+const stats = ref({})
 const pagination = reactive({
   page: 1,
   pageSize: 10,
@@ -115,7 +183,22 @@ function syncQueryToUrl() {
 }
 
 // Data fetching
+async function loadStats() {
+  if (!props.statApi) return
+  try {
+    const payload = { ...searchForm }
+    const res = await request.post(props.statApi, payload)
+    if (res.code === 0) {
+      stats.value = res.data || {}
+    }
+  } catch (error) {
+    console.error('Failed to load stats:', error)
+  }
+}
+
 async function loadData() {
+  if (props.statApi) loadStats()
+
   if (!props.api) return
 
   loading.value = true
@@ -144,6 +227,14 @@ async function loadData() {
 function handleSearch() {
   pagination.page = 1
   loadData()
+}
+
+// Reset advanced search
+function resetSearch() {
+  for (const key in searchForm) {
+    delete searchForm[key]
+  }
+  handleSearch()
 }
 
 // Handle workspace changes (reset page, reload data)
