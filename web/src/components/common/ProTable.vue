@@ -61,7 +61,10 @@
           trigger="click"
         >
           <template #reference>
-            <el-button icon="Filter">Advanced Search</el-button>
+            <el-button>
+              <el-icon><Filter /></el-icon>
+              {{ t('asset.assetInventoryTab.filters') }}
+            </el-button>
           </template>
           <el-form :model="searchForm" label-position="top" size="small">
             <el-form-item
@@ -142,7 +145,7 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Filter } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import request from '@/api/request'
 
