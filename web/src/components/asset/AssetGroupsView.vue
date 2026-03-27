@@ -1,166 +1,83 @@
 <template>
   <div class="asset-groups-view">
-    <!-- 搜索和过滤区域 -->
-    <div class="search-section">
-      <el-input
-        v-model="searchQuery"
-        :placeholder="$t('asset.searchAssetGroups')"
-        clearable
-        @input="handleSearch"
-        class="search-input"
-      >
-        <template #prefix>
-          <el-icon><Search /></el-icon>
-        </template>
-      </el-input>
-      
-      <div class="filter-actions">
-        <el-button @click="handleRefresh">
-          <el-icon><Refresh /></el-icon>
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 资产分组表格 -->
-    <el-table
-      :data="filteredGroups"
-      v-loading="loading"
-      stripe
-      class="groups-table"
+    <ProTable
+      ref="proTableRef"
+      api="/asset/groups"
+      rowKey="domain"
+      :columns="groupColumns"
+      :searchItems="groupSearchItems"
+      :searchPlaceholder="$t('asset.searchAssetGroups')"
+      @data-changed="$emit('data-changed')"
     >
-      <el-table-column type="selection" width="40" />
-      
-      <el-table-column :label="$t('asset.assetGroupName')" min-width="200">
-        <template #default="{ row }">
-          <div class="group-name">
-            <el-icon class="group-icon"><FolderOpened /></el-icon>
-            <span class="name-text">{{ row.domain }}</span>
-            <el-tag size="small" type="info" class="count-badge">{{ row.totalServices }}</el-tag>
-          </div>
-        </template>
-      </el-table-column>
+      <!-- 资产分组名称 -->
+      <template #groupName="{ row }">
+        <div class="group-name">
+          <el-icon class="group-icon"><FolderOpened /></el-icon>
+          <span class="name-text">{{ row.domain }}</span>
+          <el-tag size="small" type="info" class="count-badge">{{ row.totalServices }}</el-tag>
+        </div>
+      </template>
 
-      <el-table-column :label="$t('asset.source')" width="150">
-        <template #default="{ row }">
-          <el-tag size="small" type="success">
-            <el-icon><Compass /></el-icon>
-            {{ row.source }}
-          </el-tag>
-        </template>
-      </el-table-column>
+      <!-- 来源 -->
+      <template #source="{ row }">
+        <el-tag size="small" type="success">
+          <el-icon><Compass /></el-icon>
+          {{ row.source }}
+        </el-tag>
+      </template>
 
-      <el-table-column :label="$t('asset.totalServices')" width="120" align="center">
-        <template #default="{ row }">
-          <span class="service-count">{{ row.totalServices }} {{ $t('asset.services') }}</span>
-        </template>
-      </el-table-column>
+      <!-- 服务数 -->
+      <template #totalServices="{ row }">
+        <span class="service-count">{{ row.totalServices }} {{ $t('asset.services') }}</span>
+      </template>
 
-      <el-table-column :label="$t('asset.duration')" width="120">
-        <template #default="{ row }">
-          <span class="duration-text">{{ row.duration }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column :label="$t('asset.lastUpdated')" width="150" sortable>
-        <template #default="{ row }">
-          <span class="time-text">{{ row.lastUpdated }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column width="120" align="right">
-        <template #default="{ row }">
-          <el-button type="primary" size="small" @click="viewGroupDetails(row)">
-            {{ $t('asset.scan') }}
+      <!-- 操作 -->
+      <template #operation="{ row }">
+        <el-button type="primary" size="small" @click="viewGroupDetails(row)">
+          {{ $t('asset.scan') }}
+        </el-button>
+        <el-dropdown trigger="click" @command="handleCommand($event, row)">
+          <el-button text>
+            <el-icon><MoreFilled /></el-icon>
           </el-button>
-          <el-dropdown trigger="click" @command="handleCommand($event, row)">
-            <el-button text>
-              <el-icon><MoreFilled /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="view">{{ $t('asset.viewDetails') }}</el-dropdown-item>
-                <el-dropdown-item command="export">{{ $t('asset.export') }}</el-dropdown-item>
-                <el-dropdown-item command="delete" divided>{{ $t('asset.delete') }}</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <!-- 分页 -->
-    <el-pagination
-      v-model:current-page="pagination.page"
-      v-model:page-size="pagination.pageSize"
-      :total="pagination.total"
-      :page-sizes="[10, 20, 50, 100]"
-      layout="total, sizes, prev, pager, next"
-      class="pagination"
-      @size-change="loadData"
-      @current-change="loadData"
-    />
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="view">{{ $t('asset.viewDetails') }}</el-dropdown-item>
+              <el-dropdown-item command="export">{{ $t('asset.export') }}</el-dropdown-item>
+              <el-dropdown-item command="delete" divided>{{ $t('asset.delete') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </template>
+    </ProTable>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, FolderOpened, Compass, MoreFilled } from '@element-plus/icons-vue'
-import { getAssetGroups } from '@/api/asset'
+import { FolderOpened, Compass, MoreFilled } from '@element-plus/icons-vue'
+import { deleteAssetGroup } from '@/api/asset'
+import ProTable from '@/components/common/ProTable.vue'
 
-const emit = defineEmits(['view-details'])
+const { t } = useI18n()
+const emit = defineEmits(['view-details', 'data-changed'])
 
-const loading = ref(false)
-const searchQuery = ref('')
-const groups = ref([])
+const proTableRef = ref(null)
 
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-})
+const groupColumns = computed(() => [
+  { label: t('asset.assetGroupName'), prop: 'domain', slot: 'groupName', minWidth: 200 },
+  { label: t('asset.source'), prop: 'source', slot: 'source', width: 150 },
+  { label: t('asset.totalServices'), prop: 'totalServices', slot: 'totalServices', width: 120 },
+  { label: t('asset.duration'), prop: 'duration', width: 120 },
+  { label: t('asset.lastUpdated'), prop: 'lastUpdated', width: 150 },
+  { label: t('common.operation'), slot: 'operation', width: 120, fixed: 'right' }
+])
 
-// 过滤后的分组数据
-const filteredGroups = computed(() => {
-  if (!searchQuery.value) return groups.value
-  const query = searchQuery.value.toLowerCase()
-  return groups.value.filter(group => 
-    group.domain.toLowerCase().includes(query)
-  )
-})
-
-// 加载资产分组数据
-async function loadData() {
-  loading.value = true
-  try {
-    // 调用后端API获取按域名分组的资产统计
-    const res = await getAssetGroups({
-      page: pagination.page,
-      pageSize: pagination.pageSize
-    })
-    
-    if (res.code === 0) {
-      groups.value = res.list || []
-      pagination.total = res.total || 0
-    }
-  } catch (error) {
-    console.error('加载资产分组失败:', error)
-    ElMessage.error('加载失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleSearch() {
-  // 搜索逻辑已在computed中处理
-}
-
-function handleRefresh() {
-  searchQuery.value = ''
-  loadData()
-}
-
-
+const groupSearchItems = computed(() => [
+  { label: t('asset.assetGroupName'), prop: 'domain', type: 'input' }
+])
 
 function viewGroupDetails(row) {
   emit('view-details', row)
@@ -182,31 +99,18 @@ function handleCommand(command, row) {
 
 function exportGroupData(row) {
   try {
-    ElMessage.info('正在准备导出数据...')
-    
-    // 准备导出数据
-    const exportData = {
-      domain: row.domain,
-      totalServices: row.totalServices || 0,
-      status: row.status || '',
-      duration: row.duration || '',
-      lastUpdated: row.lastUpdated || ''
-    }
-    
-    // 生成 CSV
-    const headers = ['域名', '服务数', '状态', '持续时间', '最后更新']
-    
-    let csvContent = '\uFEFF' // BOM for UTF-8
+    ElMessage.info(t('asset.preparingExport'))
+    const headers = [t('asset.domain'), t('asset.totalServices'), t('asset.status'), t('asset.duration'), t('asset.lastUpdated')]
+    let csvContent = '\uFEFF'
     csvContent += headers.join(',') + '\n'
     csvContent += [
-      exportData.domain,
-      exportData.totalServices,
-      exportData.status,
-      exportData.duration,
-      exportData.lastUpdated
+      row.domain,
+      row.totalServices || 0,
+      row.status || '',
+      row.duration || '',
+      row.lastUpdated || ''
     ].join(',') + '\n'
-    
-    // 下载文件
+
     const now = new Date()
     const filename = `asset_group_${row.domain}_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.csv`
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' })
@@ -218,91 +122,64 @@ function exportGroupData(row) {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
-    
-    ElMessage.success('导出成功')
+    ElMessage.success(t('asset.exportSuccess', { count: 1 }))
   } catch (error) {
     console.error('导出失败:', error)
-    ElMessage.error('导出失败')
+    ElMessage.error(t('asset.exportFailed'))
   }
 }
 
 async function handleDelete(row) {
   try {
-    await ElMessageBox.confirm(`确定删除分组 ${row.domain} 吗？`, '提示', {
+    await ElMessageBox.confirm(t('asset.confirmDeleteGroup', { name: row.domain }), t('common.tip'), {
       type: 'warning'
     })
-    // 调用删除API
-    ElMessage.success('删除成功')
-    loadData()
+    const res = await deleteAssetGroup({ domain: row.domain })
+    if (res.code === 0) {
+      ElMessage.success(t('common.deleteSuccess'))
+      proTableRef.value?.loadData()
+      emit('data-changed')
+    } else {
+      ElMessage.error(res.msg || t('common.deleteFailed'))
+    }
   } catch (e) {
-    // 用户取消
+    // cancelled
   }
 }
 
-onMounted(() => {
-  loadData()
-})
+function refresh() {
+  proTableRef.value?.loadData()
+}
 
-defineExpose({ refresh: loadData })
+defineExpose({ refresh })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .asset-groups-view {
-  padding: 20px;
-}
+  height: 100%;
 
-.search-section {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-}
+  .group-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-.search-input {
-  flex: 1;
-  max-width: 400px;
-}
+  .group-icon {
+    color: var(--el-color-primary);
+    font-size: 18px;
+  }
 
-.filter-actions {
-  display: flex;
-  gap: 8px;
-}
+  .name-text {
+    font-weight: 500;
+  }
 
-.groups-table {
-  margin-bottom: 20px;
-}
+  .count-badge {
+    margin-left: auto;
+  }
 
-.group-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.group-icon {
-  color: var(--el-color-primary);
-  font-size: 18px;
-}
-
-.name-text {
-  font-weight: 500;
-}
-
-.count-badge {
-  margin-left: auto;
-}
-
-.service-count {
-  color: var(--el-text-color-regular);
-  font-size: 13px;
-}
-
-.duration-text,
-.time-text {
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
-.pagination {
-  display: flex;
-  justify-content: flex-end;
+  .service-count {
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+  }
 }
 </style>

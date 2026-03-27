@@ -235,9 +235,10 @@ type StatItem struct {
 }
 
 type IconHashStatItem struct {
-	IconHash string `json:"iconHash"`
-	IconData string `json:"iconData"` // base64 图片数据
-	Count    int    `json:"count"`
+	IconHash      string `json:"iconHash"`
+	IconData      string `json:"iconData"`                // base64 图片数据
+	IconHashBytes string `json:"iconHashBytes,omitempty"` // 同 iconData，兼容前端字段名
+	Count         int    `json:"count"`
 }
 
 type AssetDeleteReq struct {
@@ -305,6 +306,7 @@ type AssetHistoryResp struct {
 type SiteListReq struct {
 	Page       int    `json:"page,default=1"`
 	PageSize   int    `json:"pageSize,default=20"`
+	Query      string `json:"query,optional"`
 	Site       string `json:"site,optional"`
 	Title      string `json:"title,optional"`
 	App        string `json:"app,optional"`
@@ -360,6 +362,7 @@ type SiteBatchDeleteReq struct {
 type DomainListReq struct {
 	Page       int    `json:"page,default=1"`
 	PageSize   int    `json:"pageSize,default=20"`
+	Query      string `json:"query,optional"`
 	Domain     string `json:"domain,optional"`
 	RootDomain string `json:"rootDomain,optional"`
 	IP         string `json:"ip,optional"`
@@ -446,6 +449,8 @@ type AssetInventoryReq struct {
 	Ports        []int    `json:"ports,optional"`        // 端口过滤
 	StatusCodes  []string `json:"statusCodes,optional"`  // 状态码过滤
 	Labels       []string `json:"labels,optional"`       // 标签过滤
+	Service      string   `json:"service,optional"`      // 服务类型过滤
+	IconHash     string   `json:"iconHash,optional"`     // IconHash 过滤
 	TimeRange    string   `json:"timeRange,optional"`    // 时间范围: all/24h/7d/30d
 	SortBy       string   `json:"sortBy,optional"`       // 排序字段: time/name/port
 	GroupId      string   `json:"groupId,optional"`      // 资产分组ID
@@ -509,6 +514,10 @@ type ScreenshotItem struct {
 	Screenshot   string       `json:"screenshot"`   // 截图URL
 	LastUpdated  string       `json:"lastUpdated"`  // 最后更新时间
 	Technologies []Technology `json:"technologies"` // 技术栈
+	HttpHeader   string       `json:"httpHeader"`   // HTTP响应头
+	HttpBody     string       `json:"httpBody"`     // HTTP响应体
+	Service      string       `json:"service"`      // 服务类型
+	Authority    string       `json:"authority"`    // authority
 }
 
 type Technology struct {
@@ -524,6 +533,7 @@ type ScreenshotsResp struct {
 
 // ==================== IP管理 ====================
 type IPListReq struct {
+Query    string `json:"query,optional"`
 	Page     int    `json:"page,default=1"`
 	PageSize int    `json:"pageSize,default=20"`
 	IP       string `json:"ip,optional"`
@@ -769,6 +779,7 @@ type VulDetailResp struct {
 type VulListReq struct {
 	Page      int    `json:"page,default=1"`
 	PageSize  int    `json:"pageSize,default=20"`
+	Query     string `json:"query,optional"`
 	Authority string `json:"authority,optional"`
 	Severity  string `json:"severity,optional"`
 	Source    string `json:"source,optional"`

@@ -630,21 +630,7 @@ func (m *NucleiTemplateModel) FindByIds(ctx context.Context, ids []string) ([]Nu
 		return nil, nil
 	}
 
-	// 转换字符串ID为ObjectID
-	oids := make([]primitive.ObjectID, 0, len(ids))
-	for _, id := range ids {
-		oid, err := primitive.ObjectIDFromHex(id)
-		if err != nil {
-			continue
-		}
-		oids = append(oids, oid)
-	}
-
-	if len(oids) == 0 {
-		return nil, nil
-	}
-
-	cursor, err := m.coll.Find(ctx, bson.M{"_id": bson.M{"$in": oids}})
+	cursor, err := m.coll.Find(ctx, bson.M{"template_id": bson.M{"$in": ids}})
 	if err != nil {
 		return nil, err
 	}

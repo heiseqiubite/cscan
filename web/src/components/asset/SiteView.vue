@@ -1,160 +1,86 @@
-﻿<template>
+<template>
   <div class="site-view">
-    <!-- 搜索区域 -->
-    <el-card class="search-card">
-      <el-form :inline="true" class="search-form">
-        <el-form-item :label="$t('site.site')">
-          <el-input v-model="searchForm.site" :placeholder="$t('site.sitePlaceholder')" clearable @keyup.enter="handleSearch" />
-        </el-form-item>
-        <el-form-item :label="$t('site.title')">
-          <el-input v-model="searchForm.title" :placeholder="$t('site.titlePlaceholder')" clearable @keyup.enter="handleSearch" />
-        </el-form-item>
-        <el-form-item :label="$t('site.app')">
-          <el-input v-model="searchForm.app" :placeholder="$t('site.appPlaceholder')" clearable @keyup.enter="handleSearch" />
-        </el-form-item>
-        <el-form-item :label="$t('site.statusCode')">
-          <el-input v-model="searchForm.httpStatus" placeholder="200/404..." clearable @keyup.enter="handleSearch" />
-        </el-form-item>
-        <el-form-item :label="$t('site.organization')">
-          <el-select v-model="searchForm.orgId" :placeholder="$t('common.allOrganizations')" clearable style="width: 140px">
-            <el-option :label="$t('common.allOrganizations')" value="" />
-            <el-option v-for="org in organizations" :key="org.id" :label="org.name" :value="org.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>
-          <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
-          <el-button type="danger" plain @click="handleClear">{{ $t('asset.clearData') }}</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <!-- 统计信息 -->
-    <el-row :gutter="16" class="stat-row">
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-value">{{ stat.total }}</div>
-          <div class="stat-label">{{ $t('site.totalSites') }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-value">{{ stat.httpCount }}</div>
-          <div class="stat-label">{{ $t('site.httpSites') }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-value">{{ stat.httpsCount }}</div>
-          <div class="stat-label">{{ $t('site.httpsSites') }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-value">{{ stat.newCount }}</div>
-          <div class="stat-label">{{ $t('site.newSites') }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 数据表格 -->
-    <el-card class="table-card">
-      <div class="table-header">
-        <span class="total-info">{{ $t('site.totalSitesCount', { count: pagination.total }) }}</span>
-        <div class="table-actions">
-          <el-button type="danger" size="small" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
-            {{ $t('common.batchDelete') }} ({{ selectedRows.length }})
+    <ProTable
+      ref="proTableRef"
+      api="/asset/site/list"
+      statApi="/asset/site/stat"
+      batchDeleteApi="/asset/site/batchDelete"
+      rowKey="id"
+      :columns="siteColumns"
+      :searchItems="siteSearchItems"
+      :statLabels="statLabels"
+      :csvFormatter="csvFormatter"
+      selection
+      :searchPlaceholder="$t('site.sitePlaceholder')"
+      @data-changed="$emit('data-changed')"
+      :searchKeys="['site']"
+    >
+      <!-- 自定义导出 -->
+      <template #toolbar-left>
+        <el-dropdown @command="handleExport">
+          <el-button type="success" size="default">
+            {{ $t('common.export') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
-          <el-dropdown style="margin-left: 10px" @command="handleExport">
-            <el-button type="success" size="small">
-              {{ $t('common.export') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="selected-site" :disabled="selectedRows.length === 0">{{ $t('site.exportSelectedSites', { count: selectedRows.length }) }}</el-dropdown-item>
-                <el-dropdown-item divided command="all-site">{{ $t('site.exportAllSites') }}</el-dropdown-item>
-                <el-dropdown-item command="csv">{{ $t('common.exportCsv') }}</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="selected-site" :disabled="selectedRows.length === 0">{{ $t('site.exportSelectedSites', { count: selectedRows.length }) }}</el-dropdown-item>
+              <el-dropdown-item divided command="all-site">{{ $t('site.exportAllSites') }}</el-dropdown-item>
+              <el-dropdown-item command="csv">{{ $t('common.exportCsv') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </template>
+
+      <template #toolbar-right>
+        <el-button type="danger" plain @click="handleClear">{{ $t('asset.clearData') }}</el-button>
+      </template>
+
+      <!-- 站点 -->
+      <template #site="{ row }">
+        <div class="site-cell">
+          <a :href="row.site" target="_blank" class="site-link">{{ row.site }}</a>
         </div>
-      </div>
-      
-      <el-skeleton :loading="loading && tableData.length === 0" animated :count="10">
-        <template #template>
-          <div style="padding: 10px 0; display: flex; gap: 10px;">
-            <el-skeleton-item variant="rect" style="width: 30px; height: 30px;" />
-            <el-skeleton-item variant="rect" style="width: 250px; height: 30px;" />
-            <el-skeleton-item variant="rect" style="width: 150px; height: 30px;" />
-            <el-skeleton-item variant="rect" style="flex: 1; height: 30px;" />
-          </div>
-        </template>
-        <template #default>
-          <el-table :data="tableData" v-loading="loading && tableData.length > 0" stripe max-height="500" @selection-change="handleSelectionChange">
-            <el-table-column type="selection" width="40" />
-            <el-table-column :label="$t('site.site')" min-width="280">
-              <template #default="{ row }">
-                <div class="site-cell">
-                  <a :href="row.site" target="_blank" class="site-link">{{ row.site }}</a>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column :label="$t('site.title')" min-width="200" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.title || '-' }}</template>
-            </el-table-column>
-            <el-table-column :label="$t('site.statusCode')" width="80" align="center">
-              <template #default="{ row }">
-                <el-tag :type="getStatusType(row.httpStatus)" size="small">{{ row.httpStatus || '-' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column :label="$t('site.fingerprint')" min-width="180">
-              <template #default="{ row }">
-                <el-tag v-for="app in (row.app || []).slice(0, 3)" :key="app" size="small" type="success" style="margin: 2px">
-                  {{ app }}
-                </el-tag>
-                <span v-if="(row.app || []).length > 3" class="more-apps">+{{ (row.app || []).length - 3 }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="$t('site.screenshot')" width="100" align="center">
-              <template #default="{ row }">
-                <el-image
-                  v-if="row.screenshot"
-                  :src="getScreenshotUrl(row.screenshot)"
-                  :preview-src-list="[getScreenshotUrl(row.screenshot)]"
-                  :z-index="9999"
-                  :preview-teleported="true"
-                  :hide-on-click-modal="true"
-                  fit="cover"
-                  class="screenshot-img"
-                />
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
+      </template>
 
-            <el-table-column :label="$t('common.updateTime')" width="160">
-              <template #default="{ row }">{{ row.updateTime }}</template>
-            </el-table-column>
-            <el-table-column :label="$t('common.operation')" width="120" fixed="right">
-              <template #default="{ row }">
-                <el-button type="primary" link size="small" @click="showDetail(row)">{{ $t('common.detail') }}</el-button>
-                <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-      </el-skeleton>
+      <!-- 标题 -->
+      <template #title="{ row }">
+        {{ row.title || '-' }}
+      </template>
 
-      <el-pagination
-        v-model:current-page="pagination.page"
-        v-model:page-size="pagination.pageSize"
-        :total="pagination.total"
-        :page-sizes="[20, 50, 100]"
-        layout="total, sizes, prev, pager, next"
-        class="pagination"
-        @size-change="loadData"
-        @current-change="loadData"
-      />
-    </el-card>
+      <!-- 状态码 -->
+      <template #statusCode="{ row }">
+        <el-tag :type="getStatusType(row.httpStatus)" size="small">{{ row.httpStatus || '-' }}</el-tag>
+      </template>
+
+      <!-- 指纹 -->
+      <template #fingerprint="{ row }">
+        <el-tag v-for="app in (row.app || []).slice(0, 3)" :key="app" size="small" type="success" style="margin: 2px">
+          {{ app }}
+        </el-tag>
+        <span v-if="(row.app || []).length > 3" class="more-apps">+{{ (row.app || []).length - 3 }}</span>
+      </template>
+
+      <!-- 截图 -->
+      <template #screenshot="{ row }">
+        <el-image
+          v-if="row.screenshot"
+          :src="getScreenshotUrl(row.screenshot)"
+          :preview-src-list="[getScreenshotUrl(row.screenshot)]"
+          :z-index="9999"
+          :preview-teleported="true"
+          :hide-on-click-modal="true"
+          fit="cover"
+          class="screenshot-img"
+        />
+        <span v-else>-</span>
+      </template>
+
+      <!-- 操作 -->
+      <template #operation="{ row }">
+        <el-button type="primary" link size="small" @click="showDetail(row)">{{ $t('common.detail') }}</el-button>
+        <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
+      </template>
+    </ProTable>
 
     <!-- 详情侧边栏 -->
     <el-drawer v-model="detailVisible" :title="$t('site.siteDetail')" size="50%" direction="rtl">
@@ -197,88 +123,61 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
 import request from '@/api/request'
-import { clearAsset } from '@/api/asset'
+import { clearAssets } from '@/api/asset'
+import ProTable from '@/components/common/ProTable.vue'
 
 const { t } = useI18n()
-const router = useRouter()
-const route = useRoute()
 const emit = defineEmits(['data-changed'])
 
-const loading = ref(false)
-const tableData = ref([])
-const selectedRows = ref([])
+const proTableRef = ref(null)
 const organizations = ref([])
 const detailVisible = ref(false)
 const currentSite = ref(null)
 
-const searchForm = reactive({ site: '', title: '', app: '', httpStatus: '', orgId: '' })
-const stat = reactive({ total: 0, httpCount: 0, httpsCount: 0, newCount: 0 })
-const pagination = reactive({ page: 1, pageSize: 20, total: 0 })
+const selectedRows = computed(() => proTableRef.value?.selectedRows || [])
 
-// 通过 URL Query 初始化搜索条件
-function initQueryFromUrl() {
-  const q = route.query
-  if (q.site) searchForm.site = q.site
-  if (q.title) searchForm.title = q.title
-  if (q.app) searchForm.app = q.app
-  if (q.httpStatus) searchForm.httpStatus = q.httpStatus
-  if (q.orgId) searchForm.orgId = q.orgId
-  if (q.page) pagination.page = Number(q.page)
-  if (q.pageSize) pagination.pageSize = Number(q.pageSize)
-}
+const statLabels = computed(() => ({
+  total: t('site.totalSites'),
+  httpCount: t('site.httpSites'),
+  httpsCount: t('site.httpsSites'),
+  newCount: t('site.newSites')
+}))
 
-// 同步状态到 URL Query
-function syncQueryToUrl() {
-  const query = { ...route.query }
-  const fields = ['site', 'title', 'app', 'httpStatus', 'orgId']
-  fields.forEach(f => {
-    if (searchForm[f]) query[f] = String(searchForm[f])
-    else delete query[f]
-  })
-  if (pagination.page > 1) query.page = String(pagination.page); else delete query.page
-  if (pagination.pageSize !== 20) query.pageSize = String(pagination.pageSize); else delete query.pageSize
+const siteColumns = computed(() => [
+  { label: t('site.site'), prop: 'site', slot: 'site', minWidth: 280 },
+  { label: t('site.title'), prop: 'title', slot: 'title', minWidth: 200, showOverflowTooltip: true },
+  { label: t('site.statusCode'), prop: 'httpStatus', slot: 'statusCode', width: 80, align: 'center' },
+  { label: t('site.fingerprint'), prop: 'app', slot: 'fingerprint', minWidth: 180 },
+  { label: t('site.screenshot'), prop: 'screenshot', slot: 'screenshot', width: 100, align: 'center' },
+  { label: t('common.updateTime'), prop: 'updateTime', width: 160 },
+  { label: t('common.operation'), slot: 'operation', width: 120, fixed: 'right' }
+])
 
-  router.replace({ query }).catch(() => {})
-}
+const siteSearchItems = computed(() => [
+  { label: t('site.site'), prop: 'site', type: 'input', placeholder: t('site.sitePlaceholder') },
+  { label: t('site.title'), prop: 'title', type: 'input', placeholder: t('site.titlePlaceholder') },
+  { label: t('site.app'), prop: 'app', type: 'input', placeholder: t('site.appPlaceholder') },
+  { label: t('site.statusCode'), prop: 'httpStatus', type: 'input', placeholder: '200/404...' },
+  {
+    label: t('site.organization'),
+    prop: 'orgId',
+    type: 'select',
+    options: [
+      { label: t('common.allOrganizations'), value: '' },
+      ...organizations.value.map(org => ({ label: org.name, value: org.id }))
+    ]
+  }
+])
 
-function handleWorkspaceChanged() { pagination.page = 1; loadData(); loadStat() }
-
-onMounted(() => {
-  initQueryFromUrl()
-  loadData(); loadStat(); loadOrganizations()
-  window.addEventListener('workspace-changed', handleWorkspaceChanged)
-})
-onUnmounted(() => { window.removeEventListener('workspace-changed', handleWorkspaceChanged) })
-
-async function loadData() {
-  loading.value = true
-  syncQueryToUrl()
-  try {
-    const res = await request.post('/asset/site/list', {
-      page: pagination.page, pageSize: pagination.pageSize,
-      site: searchForm.site, title: searchForm.title, app: searchForm.app,
-      httpStatus: searchForm.httpStatus, orgId: searchForm.orgId
-    })
-    if (res.code === 0) { tableData.value = res.list || []; pagination.total = res.total || 0 }
-  } finally { loading.value = false }
-}
-
-async function loadStat() {
-  try {
-    const res = await request.post('/asset/site/stat', {})
-    if (res.code === 0) {
-      stat.total = res.total || 0
-      stat.httpCount = res.httpCount || 0
-      stat.httpsCount = res.httpsCount || 0
-      stat.newCount = res.newCount || 0
-    }
-  } catch (e) { console.error(e) }
+function csvFormatter(row, col) {
+  if (col.prop === 'app') {
+    return (row.app || []).join(';')
+  }
 }
 
 async function loadOrganizations() {
@@ -286,181 +185,6 @@ async function loadOrganizations() {
     const res = await request.post('/organization/list', { page: 1, pageSize: 100 })
     if (res.code === 0) organizations.value = res.list || []
   } catch (e) { console.error(e) }
-}
-
-function handleSearch() { pagination.page = 1; loadData() }
-function handleReset() {
-  Object.assign(searchForm, { site: '', title: '', app: '', httpStatus: '', orgId: '' })
-  handleSearch()
-}
-
-function handleSelectionChange(rows) { selectedRows.value = rows }
-
-async function handleBatchDelete() {
-  if (selectedRows.value.length === 0) return
-  await ElMessageBox.confirm(t('site.confirmBatchDelete', { count: selectedRows.value.length }), t('common.tip'), { type: 'warning' })
-  const ids = selectedRows.value.map(row => row.id)
-  const res = await request.post('/asset/site/batchDelete', { ids })
-  if (res.code === 0) { ElMessage.success(t('common.deleteSuccess')); selectedRows.value = []; loadData(); loadStat(); emit('data-changed') }
-}
-
-async function handleDelete(row) {
-  await ElMessageBox.confirm(t('site.confirmDeleteSite'), t('common.tip'), { type: 'warning' })
-  const res = await request.post('/asset/site/batchDelete', { ids: [row.id] })
-  if (res.code === 0) { ElMessage.success(t('common.deleteSuccess')); loadData(); loadStat(); emit('data-changed') }
-}
-
-function showDetail(row) {
-  currentSite.value = row
-  detailVisible.value = true
-}
-
-async function handleClear() {
-  try {
-    await ElMessageBox.confirm(t('asset.confirmClearAll'), t('common.warning'), { type: 'error', confirmButtonText: t('asset.confirmClearBtn'), cancelButtonText: t('common.cancel') })
-    const res = await clearAsset()
-    if (res.code === 0) { 
-      ElMessage.success(res.msg || t('asset.clearSuccess'))
-      selectedRows.value = []
-      loadData()
-      loadStat()
-      emit('data-changed') 
-    } else { 
-      ElMessage.error(res.msg || t('asset.clearFailed')) 
-    }
-  } catch (e) {
-    if (e !== 'cancel') {
-      console.error('清空资产失败:', e)
-      ElMessage.error(t('asset.clearFailed'))
-    }
-  }
-}
-
-// 导出功能
-async function handleExport(command) {
-  let data = []
-  let filename = ''
-  
-  if (command === 'selected-site') {
-    if (selectedRows.value.length === 0) {
-      ElMessage.warning(t('site.pleaseSelectSites'))
-      return
-    }
-    data = selectedRows.value
-    filename = 'sites_selected.txt'
-  } else if (command === 'csv') {
-    // CSV导出所有字段
-    ElMessage.info(t('asset.gettingAllData'))
-    try {
-      const res = await request.post('/asset/site/list', {
-        ...searchForm, page: 1, pageSize: 10000
-      })
-      if (res.code === 0) {
-        data = res.list || []
-      } else {
-        ElMessage.error(t('asset.getDataFailed'))
-        return
-      }
-    } catch (e) {
-      ElMessage.error(t('asset.getDataFailed'))
-      return
-    }
-    
-    if (data.length === 0) {
-      ElMessage.warning(t('asset.noDataToExport'))
-      return
-    }
-    
-    const headers = ['Site', 'Title', 'StatusCode', 'Server', 'IP', 'Location', 'Apps', 'Organization', 'UpdateTime']
-    const csvRows = [headers.join(',')]
-    
-    for (const row of data) {
-      const values = [
-        escapeCsvField(row.site || ''),
-        escapeCsvField(row.title || ''),
-        row.httpStatus || '',
-        escapeCsvField(row.server || ''),
-        escapeCsvField(row.ip || ''),
-        escapeCsvField(row.location || ''),
-        escapeCsvField((row.app || []).join(';')),
-        escapeCsvField(row.orgName || ''),
-        escapeCsvField(row.updateTime || '')
-      ]
-      csvRows.push(values.join(','))
-    }
-    
-    const BOM = '\uFEFF'
-    const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `sites_${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    
-    ElMessage.success(t('asset.exportSuccess', { count: data.length }))
-    return
-  } else {
-    ElMessage.info(t('asset.gettingAllData'))
-    try {
-      const res = await request.post('/asset/site/list', {
-        ...searchForm, page: 1, pageSize: 10000
-      })
-      if (res.code === 0) {
-        data = res.list || []
-      } else {
-        ElMessage.error(t('asset.getDataFailed'))
-        return
-      }
-    } catch (e) {
-      ElMessage.error(t('asset.getDataFailed'))
-      return
-    }
-    filename = 'sites_all.txt'
-  }
-  
-  if (data.length === 0) {
-    ElMessage.warning(t('asset.noDataToExport'))
-    return
-  }
-  
-  const seen = new Set()
-  const exportData = []
-  for (const row of data) {
-    if (row.site && !seen.has(row.site)) {
-      seen.add(row.site)
-      exportData.push(row.site)
-    }
-  }
-  
-  if (exportData.length === 0) {
-    ElMessage.warning(t('asset.noDataToExport'))
-    return
-  }
-  
-  const blob = new Blob([exportData.join('\n')], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-  
-  ElMessage.success(t('asset.exportSuccess', { count: exportData.length }))
-}
-
-// CSV字段转义
-function escapeCsvField(field) {
-  if (field == null) return ''
-  const str = String(field)
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return '"' + str.replace(/"/g, '""') + '"'
-  }
-  return str
 }
 
 function getStatusType(status) {
@@ -480,29 +204,173 @@ function getScreenshotUrl(screenshot) {
   return `/api/screenshot/${screenshot}`
 }
 
-function refresh() { loadData(); loadStat() }
+function showDetail(row) {
+  currentSite.value = row
+  detailVisible.value = true
+}
+
+async function handleDelete(row) {
+  try {
+    await ElMessageBox.confirm(t('site.confirmDeleteSite'), t('common.tip'), { type: 'warning' })
+    const res = await request.post('/asset/site/batchDelete', { ids: [row.id] })
+    if (res.code === 0) {
+      ElMessage.success(t('common.deleteSuccess'))
+      proTableRef.value?.loadData()
+      emit('data-changed')
+    }
+  } catch (e) {
+    // cancelled
+  }
+}
+
+async function handleClear() {
+  try {
+    await ElMessageBox.confirm(t('asset.confirmClearAll'), t('common.warning'), {
+      type: 'error',
+      confirmButtonText: t('asset.confirmClearBtn'),
+      cancelButtonText: t('common.cancel')
+    })
+    const res = await clearAssets()
+    if (res.code === 0) {
+      ElMessage.success(res.msg || t('asset.clearSuccess'))
+      proTableRef.value?.loadData()
+      emit('data-changed')
+    } else {
+      ElMessage.error(res.msg || t('asset.clearFailed'))
+    }
+  } catch (e) {
+    if (e !== 'cancel') {
+      console.error('清空资产失败:', e)
+      ElMessage.error(t('asset.clearFailed'))
+    }
+  }
+}
+
+async function handleExport(command) {
+  let data = []
+  let filename = ''
+
+  if (command === 'selected-site') {
+    if (selectedRows.value.length === 0) {
+      ElMessage.warning(t('site.pleaseSelectSites'))
+      return
+    }
+    data = selectedRows.value
+    filename = 'sites_selected.txt'
+  } else if (command === 'csv') {
+    ElMessage.info(t('asset.gettingAllData'))
+    try {
+      const res = await request.post('/asset/site/list', {
+        ...proTableRef.value?.searchForm, page: 1, pageSize: 10000
+      })
+      if (res.code === 0) { data = res.list || [] } else { ElMessage.error(t('asset.getDataFailed')); return }
+    } catch (e) { ElMessage.error(t('asset.getDataFailed')); return }
+
+    if (data.length === 0) { ElMessage.warning(t('asset.noDataToExport')); return }
+
+    const headers = ['Site', 'Title', 'StatusCode', 'Server', 'IP', 'Location', 'Apps', 'Organization', 'UpdateTime']
+    const csvRows = [headers.join(',')]
+    for (const row of data) {
+      const values = [
+        escapeCsvField(row.site || ''),
+        escapeCsvField(row.title || ''),
+        row.httpStatus || '',
+        escapeCsvField(row.server || ''),
+        escapeCsvField(row.ip || ''),
+        escapeCsvField(row.location || ''),
+        escapeCsvField((row.app || []).join(';')),
+        escapeCsvField(row.orgName || ''),
+        escapeCsvField(row.updateTime || '')
+      ]
+      csvRows.push(values.join(','))
+    }
+    const BOM = '\uFEFF'
+    const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `sites_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('asset.exportSuccess', { count: data.length }))
+    return
+  } else {
+    ElMessage.info(t('asset.gettingAllData'))
+    try {
+      const res = await request.post('/asset/site/list', {
+        ...proTableRef.value?.searchForm, page: 1, pageSize: 10000
+      })
+      if (res.code === 0) { data = res.list || [] } else { ElMessage.error(t('asset.getDataFailed')); return }
+    } catch (e) { ElMessage.error(t('asset.getDataFailed')); return }
+    filename = 'sites_all.txt'
+  }
+
+  if (data.length === 0) { ElMessage.warning(t('asset.noDataToExport')); return }
+
+  const seen = new Set()
+  const exportData = []
+  for (const row of data) {
+    if (row.site && !seen.has(row.site)) { seen.add(row.site); exportData.push(row.site) }
+  }
+  if (exportData.length === 0) { ElMessage.warning(t('asset.noDataToExport')); return }
+
+  const blob = new Blob([exportData.join('\n')], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url; link.download = filename
+  document.body.appendChild(link); link.click(); document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  ElMessage.success(t('asset.exportSuccess', { count: exportData.length }))
+}
+
+function escapeCsvField(field) {
+  if (field == null) return ''
+  const str = String(field)
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return '"' + str.replace(/"/g, '""') + '"'
+  }
+  return str
+}
+
+function handleWorkspaceChanged() {
+  loadOrganizations()
+}
+
+onMounted(() => {
+  loadOrganizations()
+  window.addEventListener('workspace-changed', handleWorkspaceChanged)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('workspace-changed', handleWorkspaceChanged)
+})
+
+function refresh() {
+  proTableRef.value?.loadData()
+}
 
 defineExpose({ refresh })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .site-view {
-  .search-card { margin-bottom: 16px; }
-  .stat-row {
-    margin-bottom: 16px;
-    .stat-card {
-      text-align: center;
-      .stat-value { font-size: 28px; font-weight: 600; color: var(--el-color-primary); }
-      .stat-label { color: var(--el-text-color-secondary); margin-top: 8px; }
-    }
+  height: 100%;
+
+  .site-cell .site-link {
+    color: #409eff;
+    text-decoration: none;
+    font-family: monospace;
+    &:hover { text-decoration: underline; }
   }
-  .table-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
-    .total-info { color: var(--el-text-color-secondary); font-size: 14px; }
+  .more-apps {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
   }
-  .site-cell .site-link { color: #409eff; text-decoration: none; font-family: monospace; &:hover { text-decoration: underline; } }
-  .more-apps { color: var(--el-text-color-secondary); font-size: 12px; }
-  .screenshot-img { width: 80px; height: 60px; border-radius: 4px; cursor: pointer; }
-  .pagination { margin-top: 16px; justify-content: flex-end; }
+  .screenshot-img {
+    width: 80px;
+    height: 60px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
 }
 </style>
-

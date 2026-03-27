@@ -163,9 +163,12 @@ func (s *FingerprintScanner) RunHttpxLib(ctx context.Context, assets []*Asset, o
 				}
 			}
 
-			// Favicon hash
+			// Favicon hash + data
 			if result.FavIconMMH3 != "" {
 				asset.IconHash = result.FavIconMMH3
+			}
+			if len(result.FaviconData) > 0 && isImageData(result.FaviconData) {
+				asset.IconData = result.FaviconData
 			}
 
 			// Server header
@@ -232,6 +235,46 @@ func (s *FingerprintScanner) RunHttpxLib(ctx context.Context, assets []*Asset, o
 	httpxRunner.RunEnumeration()
 
 	return nil
+}
+
+// isImageData 检查字节数据是否为有效的图片格式（通过魔数判断）
+func isImageData(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	// PNG: 89 50 4E 47
+	if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+		return true
+	}
+	// JPEG: FF D8 FF
+	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return true
+	}
+	// GIF: 47 49 46 38
+	if data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38 {
+		return true
+	}
+	// ICO: 00 00 01 00 or 00 00 02 00
+	if data[0] == 0x00 && data[1] == 0x00 && (data[2] == 0x01 || data[2] == 0x02) && data[3] == 0x00 {
+		return true
+	}
+	// BMP: 42 4D
+	if data[0] == 0x42 && data[1] == 0x4D {
+		return true
+	}
+	// WebP: RIFF....WEBP
+	if len(data) >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 &&
+		data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50 {
+		return true
+	}
+	// SVG: 以 '<svg' 或 '<?xml' 开头（文本格式）
+	if data[0] == '<' {
+		header := strings.ToLower(string(data[:min(len(data), 100)]))
+		if strings.HasPrefix(header, "<svg") || (strings.HasPrefix(header, "<?xml") && strings.Contains(header, "<svg")) {
+			return true
+		}
+	}
+	return false
 }
 
 // runHttpxLib 使用httpx库进行批量探测（替代原有的runHttpx命令行方式）

@@ -5,6 +5,7 @@ import (
 	"cscan/api/internal/logic/common"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
+	"cscan/pkg/utils"
 	"fmt"
 	"strings"
 	"time"
@@ -272,41 +273,22 @@ func formatDuration(d time.Duration) string {
 
 // extractMainDomainFromTarget 从任务目标中提取主域名
 func extractMainDomainFromTarget(target string) string {
-	// 移除协议前缀
-	target = strings.TrimPrefix(target, "http://")
-	target = strings.TrimPrefix(target, "https://")
-
-	// 移除端口
-	if idx := strings.Index(target, ":"); idx > 0 {
-		target = target[:idx]
-	}
-
-	// 移除路径
-	if idx := strings.Index(target, "/"); idx > 0 {
-		target = target[:idx]
+	// 使用 utils 解析目标主域名，自动剥离各种协议和额外字符
+	info := utils.ParseTarget(target)
+	if info.Host == "" {
+		return ""
 	}
 
 	// 移除通配符
-	target = strings.TrimPrefix(target, "*.")
+	host := strings.TrimPrefix(info.Host, "*.")
 
-	// 移除CIDR
-	if strings.Contains(target, "/") {
-		return "" // CIDR不作为域名分组
+	// 提取根域名
+	rootDomain := utils.GetRootDomain(host)
+	if rootDomain != "" {
+		return rootDomain
 	}
 
-	// 如果是IP地址，返回IP
-	if isIPAddress(target) {
-		return target
-	}
-
-	// 提取主域名
-	parts := strings.Split(target, ".")
-	if len(parts) < 2 {
-		return target
-	}
-
-	// 返回主域名（最后两部分）
-	return strings.Join(parts[len(parts)-2:], ".")
+	return host
 }
 
 // getTaskStatusForGroup 将任务状态转换为分组状态
@@ -334,14 +316,13 @@ func extractMainDomain(host string) string {
 		return host
 	}
 
-	// 分割域名
-	parts := strings.Split(host, ".")
-	if len(parts) < 2 {
-		return host
+	// 使用 utils 的 GetRootDomain 提取
+	rootDomain := utils.GetRootDomain(host)
+	if rootDomain != "" {
+		return rootDomain
 	}
 
-	// 返回主域名（最后两部分）
-	return strings.Join(parts[len(parts)-2:], ".")
+	return host
 }
 
 // isIPAddress 判断是否为IP地址

@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"cscan/pkg/utils"
 	"context"
 	"fmt"
 	"net"
@@ -105,7 +106,7 @@ func (s *PortScanner) scanPorts(ctx context.Context, targets []string, ports []i
 				default:
 					if isPortOpen(task.target, task.port, opts.Timeout) {
 						asset := &Asset{
-							Authority: fmt.Sprintf("%s:%d", task.target, task.port),
+							Authority: utils.BuildTargetWithPort(task.target, task.port),
 							Host:      task.target,
 							Port:      task.port,
 							Category:  getCategory(task.target),

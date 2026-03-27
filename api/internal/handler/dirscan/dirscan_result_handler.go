@@ -18,6 +18,7 @@ import (
 type DirScanResultListReq struct {
 	TaskId     string `json:"taskId"`
 	Authority  string `json:"authority"`
+	Url        string `json:"url"`
 	Path       string `json:"path"`
 	StatusCode int    `json:"statusCode"`
 	SizeMin    *int64 `json:"sizeMin"`    // 响应大小最小值
@@ -26,6 +27,7 @@ type DirScanResultListReq struct {
 	PageSize   int    `json:"pageSize"`
 	SortField  string `json:"sortField"`  // 排序字段: statusCode, contentLength, contentWords, contentLines, duration
 	SortOrder  string `json:"sortOrder"`  // 排序方向: asc, desc
+	Query      string `json:"query,optional"` // 全局搜索关键词
 }
 
 // DirScanResultListResp 列表响应
@@ -57,6 +59,11 @@ func DirScanResultListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		workspaceId := middleware.GetWorkspaceId(ctx)
 		resultModel := model.NewDirScanResultModel(svcCtx.MongoDB)
 
+		// 如果有通用 Query 且未指定更细的 URL/Path/Authority 条件，则将 Query 作为 URL 关键字使用
+		if req.Query != "" && req.Url == "" && req.Path == "" && req.Authority == "" {
+			req.Url = req.Query
+		}
+
 		// 构建查询条件 - 当 workspaceId 为空或 "all" 时查询所有
 		filter := bson.M{}
 		if workspaceId != "" && workspaceId != "all" {
@@ -67,6 +74,9 @@ func DirScanResultListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 		if req.Authority != "" {
 			filter["authority"] = bson.M{"$regex": req.Authority, "$options": "i"}
+		}
+		if req.Url != "" {
+			filter["url"] = bson.M{"$regex": req.Url, "$options": "i"}
 		}
 		if req.Path != "" {
 			filter["path"] = bson.M{"$regex": req.Path, "$options": "i"}

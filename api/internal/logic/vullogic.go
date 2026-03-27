@@ -2,8 +2,10 @@ package logic
 
 import (
 	"context"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"cscan/api/internal/logic/common"
@@ -32,8 +34,25 @@ func NewVulListLogic(ctx context.Context, svcCtx *svc.ServiceContext) *VulListLo
 func (l *VulListLogic) VulList(req *types.VulListReq, workspaceId string) (resp *types.VulListResp, err error) {
 	// 构建查询条件
 	filter := bson.M{}
+	// 如果提供了通用 Query 且未显式指定 Authority/Host，则按多个字段模糊匹配
+	if req.Query != "" && req.Authority == "" && req.Host == "" {
+		q := regexp.QuoteMeta(req.Query)
+		filter["$or"] = []bson.M{
+			{"authority": bson.M{"$regex": q, "$options": "i"}},
+			{"host": bson.M{"$regex": q, "$options": "i"}},
+			{"url": bson.M{"$regex": q, "$options": "i"}},
+			{"pocfile": bson.M{"$regex": q, "$options": "i"}},
+		}
+	}
 	if req.Authority != "" {
-		filter["authority"] = bson.M{"$regex": req.Authority, "$options": "i"}
+		authQuery := req.Authority
+		if strings.HasPrefix(authQuery, "http://") {
+			authQuery = strings.TrimPrefix(authQuery, "http://")
+		} else if strings.HasPrefix(authQuery, "https://") {
+			authQuery = strings.TrimPrefix(authQuery, "https://")
+		}
+		authQuery = regexp.QuoteMeta(authQuery)
+		filter["authority"] = bson.M{"$regex": authQuery, "$options": "i"}
 	}
 	if req.Severity != "" {
 		filter["severity"] = req.Severity

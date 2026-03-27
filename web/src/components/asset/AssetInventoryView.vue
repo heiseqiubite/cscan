@@ -180,7 +180,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Filter, Sort, Clock, Refresh, Picture, Delete } from '@element-plus/icons-vue'
-import { getAssetList, batchDeleteAsset } from '@/api/asset'
+import { getAssetList, batchDeleteAssets } from '@/api/asset'
 
 const loading = ref(false)
 const searchQuery = ref('')
@@ -267,7 +267,7 @@ async function handleDelete(asset) {
       type: 'warning'
     })
     
-    const res = await batchDeleteAsset({ ids: [asset.id] })
+    const res = await batchDeleteAssets({ ids: [asset.id] })
     if (res.code === 0) {
       ElMessage.success('删除成功')
       loadData()

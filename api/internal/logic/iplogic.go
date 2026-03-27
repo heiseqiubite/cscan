@@ -51,6 +51,16 @@ func (l *IPLogic) IPList(req *types.IPListReq, workspaceId string) (*types.IPLis
 		// 基础条件：有IP的资产
 		// 不加基础条件，查询所有资产然后提取IP
 
+		// 最上方筛选 (Query)
+		if req.Query != "" {
+			conditions = append(conditions, bson.M{
+				"$or": []bson.M{
+					{"host": bson.M{"$regex": req.Query, "$options": "i"}},
+					{"ip.ipv4.ip": bson.M{"$regex": req.Query, "$options": "i"}},
+				},
+			})
+		}
+
 		// IP搜索
 		if req.IP != "" {
 			conditions = append(conditions, bson.M{

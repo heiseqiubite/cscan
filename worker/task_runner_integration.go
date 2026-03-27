@@ -561,6 +561,9 @@ func (e *FingerprintExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 				originalAsset.HttpBody = fpAsset.HttpBody
 				originalAsset.Server = fpAsset.Server
 				originalAsset.IconHash = fpAsset.IconHash
+				if len(fpAsset.IconData) > 0 {
+					originalAsset.IconData = fpAsset.IconData
+				}
 				originalAsset.Screenshot = fpAsset.Screenshot
 			}
 		}

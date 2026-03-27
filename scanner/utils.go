@@ -169,27 +169,17 @@ func GenerateAssetsFromTargets(target string) []*Asset {
 			pt := parseSingleTarget(info)
 			assets = append(assets, buildAssetFromParsed(pt, category))
 		} else {
-			// 用户输入纯域名/IP（无协议无端口），同时生成 HTTP:80 和 HTTPS:443
-			// 确保覆盖：无法预知目标是 HTTP 还是 HTTPS，交由 Nuclei 引擎处理
-			httpAsset := &Asset{
+			// 用户输入纯域名/IP（无协议无端口），默认传不带端口的目标
+			asset := &Asset{
 				Host:      info.Host,
-				Port:      80,
+				Port:      0,
 				Category:  category,
 				Source:    "user_input",
 				IsHTTP:    true,
 				Authority: info.Host,
-				Service:   "http",
+				Service:   "",
 			}
-			httpsAsset := &Asset{
-				Host:      info.Host,
-				Port:      443,
-				Category:  category,
-				Source:    "user_input",
-				IsHTTP:    true,
-				Authority: info.Host,
-				Service:   "https",
-			}
-			assets = append(assets, httpAsset, httpsAsset)
+			assets = append(assets, asset)
 		}
 	}
 

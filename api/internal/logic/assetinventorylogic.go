@@ -7,6 +7,7 @@ import (
 	"cscan/api/internal/types"
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -48,9 +49,13 @@ func (l *AssetInventoryLogic) AssetInventory(req *types.AssetInventoryReq, works
 
 		// 搜索关键词
 		if req.Query != "" {
+			q := req.Query
 			filter["$or"] = []bson.M{
-				{"host": bson.M{"$regex": req.Query, "$options": "i"}},
-				{"title": bson.M{"$regex": req.Query, "$options": "i"}},
+				{"host": bson.M{"$regex": q, "$options": "i"}},
+				{"title": bson.M{"$regex": q, "$options": "i"}},
+				{"domain": bson.M{"$regex": q, "$options": "i"}},
+				{"ip.ipv4.ip": bson.M{"$regex": q, "$options": "i"}},
+				{"ip.ipv6.ip": bson.M{"$regex": q, "$options": "i"}},
 			}
 		}
 
@@ -74,13 +79,24 @@ func (l *AssetInventoryLogic) AssetInventory(req *types.AssetInventoryReq, works
 			filter["labels"] = bson.M{"$in": req.Labels}
 		}
 
+		// 服务类型过滤
+		if req.Service != "" {
+			filter["service"] = bson.M{"$regex": req.Service, "$options": "i"}
+		}
+
+		// IconHash 过滤
+		if req.IconHash != "" {
+			filter["icon_hash"] = req.IconHash
+		}
+
 		// 技术栈过滤
 		if len(req.Technologies) > 0 {
 			// 使用正则表达式匹配技术栈（不区分大小写）
 			techFilters := make([]bson.M, 0, len(req.Technologies))
 			for _, tech := range req.Technologies {
+				escapedTech := regexp.QuoteMeta(tech)
 				techFilters = append(techFilters, bson.M{
-					"app": bson.M{"$regex": tech, "$options": "i"},
+					"app": bson.M{"$regex": escapedTech, "$options": "i"},
 				})
 			}
 			if len(techFilters) > 0 {
@@ -131,9 +147,9 @@ func (l *AssetInventoryLogic) AssetInventory(req *types.AssetInventoryReq, works
 				ip = asset.Ip.IpV6[0].IPName
 			}
 
-			// 将 IconHashBytes 转换为 Base64 字符串
+			// 将 IconHashBytes 转换为 Base64 字符串（仅当是有效图片数据时）
 			iconHashBytes := ""
-			if len(asset.IconHashBytes) > 0 {
+			if len(asset.IconHashBytes) > 0 && isValidImageBytes(asset.IconHashBytes) {
 				iconHashBytes = base64.StdEncoding.EncodeToString(asset.IconHashBytes)
 			}
 

@@ -499,16 +499,21 @@ func (s *FingerprintScanner) runAdditionalFingerprint(ctx context.Context, asset
 	// 获取 IconHash 和 MMH3 hash（用于自定义指纹匹配）
 	var faviconMMH3Hash string
 	if opts.IconHash || opts.CustomEngine {
-		// 无论 IconHash 是否已有值，都需要获取原始图片数据用于前端显示
-		iconHash, iconData := s.getIconHashWithData(targetUrl)
+		// 保存 httpx 可能已获取的 IconData 作为回退
+		existingIconData := asset.IconData
+
+		// 传入 HTML body 用于解析 <link rel="icon"> 标签发现自定义favicon路径
+		iconHash, iconData := s.getIconHashWithData(targetUrl, asset.HttpBody)
 		if len(iconData) > 0 {
-			// 保存 icon 图片数据
+			// 内置获取成功，使用内置数据
 			asset.IconData = iconData
 			faviconMMH3Hash = CalculateMMH3Hash(iconData)
-			// 如果 httpx 没有获取到 IconHash，使用我们计算的
 			if asset.IconHash == "" && iconHash != "" {
 				asset.IconHash = iconHash
 			}
+		} else if len(existingIconData) > 0 {
+			// 内置获取失败，回退到 httpx 已获取的数据
+			faviconMMH3Hash = CalculateMMH3Hash(existingIconData)
 		}
 	}
 
@@ -583,30 +588,53 @@ func (s *FingerprintScanner) runAdditionalFingerprint(ctx context.Context, asset
 }
 
 // getIconHashWithData 获取favicon的hash值和原始数据
-func (s *FingerprintScanner) getIconHashWithData(baseUrl string) (string, []byte) {
-	// 尝试常见的favicon路径
-	faviconPaths := []string{
+// htmlBody: 可选的HTML body内容，用于解析 <link rel="icon"> 标签发现自定义favicon路径
+func (s *FingerprintScanner) getIconHashWithData(baseUrl string, htmlBody string) (string, []byte) {
+	// 构建favicon候选路径列表
+	faviconPaths := []string{}
+
+	// 1. 先从HTML中解析 <link rel="icon"> 标签获取自定义favicon路径
+	if htmlBody != "" {
+		parsedPaths := parseFaviconFromHTML(htmlBody, baseUrl)
+		faviconPaths = append(faviconPaths, parsedPaths...)
+	}
+
+	// 2. 追加常见的favicon路径作为回退
+	faviconPaths = append(faviconPaths,
 		"/favicon.ico",
 		"/favicon.png",
 		"/static/favicon.ico",
 		"/assets/favicon.ico",
-	}
+	)
 
 	for _, path := range faviconPaths {
-		iconUrl := baseUrl + path
+		var iconUrl string
+		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+			// 已经是完整URL
+			iconUrl = path
+		} else {
+			iconUrl = baseUrl + path
+		}
+
 		resp, err := s.client.Get(iconUrl)
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
+
+		// 立即读取并关闭，避免 defer 在循环中导致连接泄漏
+		iconData, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		resp.Body.Close()
 
 		if resp.StatusCode != 200 {
 			continue
 		}
 
-		// 读取icon内容
-		iconData, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		if err != nil || len(iconData) == 0 {
+		if readErr != nil || len(iconData) == 0 {
+			continue
+		}
+
+		// 验证是否为有效的图片数据（过滤HTML错误页等非图片响应）
+		if !isImageData(iconData) {
 			continue
 		}
 
@@ -616,6 +644,53 @@ func (s *FingerprintScanner) getIconHashWithData(baseUrl string) (string, []byte
 	}
 
 	return "", nil
+}
+
+// parseFaviconFromHTML 从HTML内容中解析favicon路径
+// 支持 <link rel="icon" href="..."> 和 <link rel="shortcut icon" href="...">
+func parseFaviconFromHTML(htmlBody string, baseUrl string) []string {
+	var paths []string
+	seen := make(map[string]bool)
+
+	// 匹配 <link> 标签中包含 rel="icon" 或 rel="shortcut icon" 的 href
+	// 支持单引号和双引号，支持属性顺序不同
+	linkRe := regexp.MustCompile(`(?i)<link[^>]*\brel\s*=\s*["'](?:shortcut\s+)?icon["'][^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*/?>`)
+	matches := linkRe.FindAllStringSubmatch(htmlBody, -1)
+
+	// 也匹配 href 在 rel 之前的情况
+	linkRe2 := regexp.MustCompile(`(?i)<link[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["'](?:shortcut\s+)?icon["'][^>]*/?>`)
+	matches = append(matches, linkRe2.FindAllStringSubmatch(htmlBody, -1)...)
+
+	// 也匹配 apple-touch-icon
+	linkRe3 := regexp.MustCompile(`(?i)<link[^>]*\brel\s*=\s*["']apple-touch-icon(?:-precomposed)?["'][^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*/?>`)
+	matches = append(matches, linkRe3.FindAllStringSubmatch(htmlBody, -1)...)
+
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		href := strings.TrimSpace(m[1])
+		if href == "" || seen[href] {
+			continue
+		}
+		seen[href] = true
+
+		// 处理相对路径
+		if strings.HasPrefix(href, "//") {
+			// 协议相对URL
+			href = "https:" + href
+		} else if strings.HasPrefix(href, "/") {
+			// 绝对路径 - 将在调用方拼接baseUrl
+			// 保持原样，调用方会处理
+		} else if !strings.HasPrefix(href, "http://") && !strings.HasPrefix(href, "https://") {
+			// 相对路径
+			href = "/" + href
+		}
+
+		paths = append(paths, href)
+	}
+
+	return paths
 }
 
 // fingerprint 识别单个资产指纹
@@ -671,7 +746,7 @@ func (s *FingerprintScanner) fingerprint(ctx context.Context, asset *Asset, opts
 		// 获取Icon Hash和原始数据
 		var faviconMMH3Hash string
 		if opts.IconHash {
-			iconHash, iconData := s.getIconHashWithData(targetUrl)
+			iconHash, iconData := s.getIconHashWithData(targetUrl, asset.HttpBody)
 			if iconHash != "" {
 				asset.IconHash = iconHash
 			}

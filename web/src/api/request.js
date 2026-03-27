@@ -34,24 +34,48 @@ request.interceptors.request.use(
 )
 
 // 响应拦截器
+let isRelogin = false
+
 request.interceptors.response.use(
   response => {
     const res = response.data
     if (res.code === 401) {
-      const userStore = useUserStore()
-      userStore.logout()
-      router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
+      if (!isRelogin) {
+        isRelogin = true
+        const userStore = useUserStore()
+        userStore.logout()
+        router.push('/login').catch(() => {}).finally(() => {
+          setTimeout(() => {
+            isRelogin = false
+          }, 1000)
+        })
+        ElMessage({
+          message: '登录已过期，请重新登录',
+          type: 'error',
+          grouping: true
+        })
+      }
       return Promise.reject(new Error('Unauthorized'))
     }
     return res
   },
   error => {
     if (error.response && error.response.status === 401) {
-      const userStore = useUserStore()
-      userStore.logout()
-      router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
+      if (!isRelogin) {
+        isRelogin = true
+        const userStore = useUserStore()
+        userStore.logout()
+        router.push('/login').catch(() => {}).finally(() => {
+          setTimeout(() => {
+            isRelogin = false
+          }, 1000)
+        })
+        ElMessage({
+          message: '登录已过期，请重新登录',
+          type: 'error',
+          grouping: true
+        })
+      }
     } else {
       // 优化网络错误和后端未启动时的弹窗提示
       const errorMsg = error.message || '请求失败'

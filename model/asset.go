@@ -469,10 +469,9 @@ func (m *AssetModel) AggregateIconHash(ctx context.Context, limit int) ([]IconHa
 		{{Key: "$match", Value: bson.D{
 			{Key: "icon_hash", Value: bson.D{{Key: "$exists", Value: true}, {Key: "$ne", Value: ""}}},
 		}}},
-		// 按 icon_hash 分组，取第一个图片数据
+		// 按 icon_hash 分组，统计数量
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$icon_hash"},
-			{Key: "iconData", Value: bson.D{{Key: "$first", Value: "$icon_hash_bytes"}}},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
 		}}},
 		{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}},
@@ -485,11 +484,28 @@ func (m *AssetModel) AggregateIconHash(ctx context.Context, limit int) ([]IconHa
 	}
 	defer cursor.Close(ctx)
 
-	var results []IconHashStatResult
-	if err = cursor.All(ctx, &results); err != nil {
+	// 第一阶段：获取统计结果（不含图片数据）
+	var stats []IconHashStatResult
+	if err = cursor.All(ctx, &stats); err != nil {
 		return nil, err
 	}
-	return results, nil
+
+	// 第二阶段：为每个 icon_hash 查找一条有 icon_hash_bytes 的文档，补充图片数据
+	for i, s := range stats {
+		var asset struct {
+			IconHashBytes []byte `bson:"icon_hash_bytes"`
+		}
+		// 使用 $type 过滤确保字段存在且为 binData 类型（BSON type 5）
+		err := m.coll.FindOne(ctx, bson.M{
+			"icon_hash":       s.IconHash,
+			"icon_hash_bytes": bson.M{"$type": "binData"},
+		}, options.FindOne().SetProjection(bson.M{"icon_hash_bytes": 1})).Decode(&asset)
+		if err == nil && len(asset.IconHashBytes) > 0 {
+			stats[i].IconData = asset.IconHashBytes
+		}
+	}
+
+	return stats, nil
 }
 
 // AssetHistory 资产历史记录
@@ -691,30 +707,34 @@ func (m *AssetModel) BulkUpsert(ctx context.Context, assets []*Asset) (*mongo.Bu
 	var models []mongo.WriteModel
 	for _, asset := range assets {
 		filter := bson.M{"host": asset.Host, "port": asset.Port}
+		setFields := bson.M{
+			"authority":   asset.Authority,
+			"category":    asset.Category,
+			"service":     asset.Service,
+			"server":      asset.Server,
+			"banner":      asset.Banner,
+			"title":       asset.Title,
+			"app":         asset.App,
+			"status":      asset.HttpStatus,
+			"header":      asset.HttpHeader,
+			"body":        asset.HttpBody,
+			"cert":        asset.Cert,
+			"icon_hash":   asset.IconHash,
+			"screenshot":  asset.Screenshot,
+			"cdn":         asset.IsCDN,
+			"cname":       asset.CName,
+			"cloud":       asset.IsCloud,
+			"is_http":     asset.IsHTTP,
+			"taskId":      asset.TaskId,
+			"source":      asset.Source,
+			"update_time": now,
+			"update":      true,
+		}
+		if len(asset.IconHashBytes) > 0 {
+			setFields["icon_hash_bytes"] = asset.IconHashBytes
+		}
 		update := bson.M{
-			"$set": bson.M{
-				"authority":   asset.Authority,
-				"category":    asset.Category,
-				"service":     asset.Service,
-				"server":      asset.Server,
-				"banner":      asset.Banner,
-				"title":       asset.Title,
-				"app":         asset.App,
-				"status":      asset.HttpStatus,
-				"header":      asset.HttpHeader,
-				"body":        asset.HttpBody,
-				"cert":        asset.Cert,
-				"icon_hash":   asset.IconHash,
-				"screenshot":  asset.Screenshot,
-				"cdn":         asset.IsCDN,
-				"cname":       asset.CName,
-				"cloud":       asset.IsCloud,
-				"is_http":     asset.IsHTTP,
-				"taskId":      asset.TaskId,
-				"source":      asset.Source,
-				"update_time": now,
-				"update":      true,
-			},
+			"$set": setFields,
 			"$setOnInsert": bson.M{
 				"_id":         primitive.NewObjectID(),
 				"create_time": now,

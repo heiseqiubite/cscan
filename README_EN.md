@@ -8,19 +8,18 @@
 [![Vue](https://img.shields.io/badge/Vue-3.4-4FC08D?style=flat&logo=vue.js)](https://vuejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-2.7-green)](VERSION)
-[![Demo](https://img.shields.io/badge/Demo-Live-orange)](http://cscan.txf7.cn)
 
 ## Features
 
-| Module | Function | Tools |
-|--------|----------|-------|
-| Asset Discovery | Port Scanning, Service Detection | Naabu / Masscan / Nmap |
-| Subdomain Enum | Passive Enum + Dictionary Brute | Subfinder + KSubdomain |
+| Module | Function | Tools                              |
+|--------|----------|------------------------------------|
+| Asset Discovery | Port Scanning, Service Detection | Naabu / Masscan / Nmap             |
+| Subdomain Enum | Passive Enum + Dictionary Brute | Subfinder + KSubdomain             |
 | Fingerprinting | Web Fingerprint, 3W+ Rules | Httpx + Wappalyzer + Custom Engine |
-| URL Discovery | Path Crawling | Urlfinder |
-| Vuln Detection | POC Scanning, Custom POC | Nuclei SDK |
-| Web Screenshot | Page Snapshot | Chromedp / HTTPX |
-| Online Data Source | API Aggregation Search | FOFA / Hunter / Quake |
+| URL Discovery | Path Crawling | FFuF                               |
+| Vuln Detection | POC Scanning, Custom POC | Nuclei SDK                         |
+| Web Screenshot | Page Snapshot | Chromedp / HTTPX                   |
+| Online Data Source | API Aggregation Search | FOFA / Hunter / Quake              |
 
 **Platform Capabilities**: Distributed Architecture · Multi-Workspace · Report Export · Audit Log
 

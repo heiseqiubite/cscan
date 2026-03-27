@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"cscan/pkg/utils"
 	"context"
 	"encoding/json"
 	"errors"
@@ -314,7 +315,7 @@ func (s *NaabuScanner) scanSingleTargetWithLogger(ctx context.Context, target, p
 			host := hr.Host
 			for _, port := range hr.Ports {
 				asset := &Asset{
-					Authority: fmt.Sprintf("%s:%d", host, port.Port),
+					Authority: utils.BuildTargetWithPort(host, port.Port),
 					Host:      host,
 					Port:      port.Port,
 					Category:  getCategory(host),

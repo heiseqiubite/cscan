@@ -51,15 +51,21 @@ func (l *DomainLogic) DomainList(req *types.DomainListReq, workspaceId string) (
 
 		filter := bson.M{}
 
-		// 域名搜索
-		if req.Domain != "" {
+		// 优先使用通用 Query 关键字（当未指定 Domain/RootDomain/IP 时）
+		if req.Query != "" && req.Domain == "" && req.RootDomain == "" && req.IP == "" {
 			filter["$and"] = []bson.M{
 				{"$or": baseCondition},
 				{"$or": []bson.M{
-					{"domain": bson.M{"$regex": req.Domain, "$options": "i"}},
-					{"host": bson.M{"$regex": req.Domain, "$options": "i"}},
-					{"authority": bson.M{"$regex": req.Domain, "$options": "i"}},
+					{"domain": bson.M{"$regex": req.Query, "$options": "i"}},
+					{"host": bson.M{"$regex": req.Query, "$options": "i"}},
+					{"ip.ipv4.ip": bson.M{"$regex": req.Query, "$options": "i"}},
 				}},
+			}
+		} else if req.Domain != "" {
+			// 域名搜索
+			filter["$and"] = []bson.M{
+				{"$or": baseCondition},
+				{"domain": bson.M{"$regex": req.Domain, "$options": "i"}},
 			}
 		} else if req.RootDomain != "" {
 			// 根域名搜索

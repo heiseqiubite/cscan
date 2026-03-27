@@ -20,6 +20,46 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+// isValidImageBytes 检查二进制数据是否为有效的图片格式（通过魔数判断）
+func isValidImageBytes(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	// PNG: 89 50 4E 47
+	if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+		return true
+	}
+	// JPEG: FF D8 FF
+	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return true
+	}
+	// GIF: 47 49 46 38
+	if data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38 {
+		return true
+	}
+	// ICO: 00 00 01 00 or 00 00 02 00
+	if data[0] == 0x00 && data[1] == 0x00 && (data[2] == 0x01 || data[2] == 0x02) && data[3] == 0x00 {
+		return true
+	}
+	// BMP: 42 4D
+	if data[0] == 0x42 && data[1] == 0x4D {
+		return true
+	}
+	// WebP: RIFF....WEBP
+	if len(data) >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 &&
+		data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50 {
+		return true
+	}
+	// SVG: 以 '<svg' 或 '<?xml' 开头（文本格式）
+	if data[0] == '<' {
+		header := strings.ToLower(string(data[:min(len(data), 100)]))
+		if strings.HasPrefix(header, "<svg") || (strings.HasPrefix(header, "<?xml") && strings.Contains(header, "<svg")) {
+			return true
+		}
+	}
+	return false
+}
+
 // formatTimeIfNotZero 格式化时间，如果是零值则返回空字符串
 func formatTimeIfNotZero(t time.Time) string {
 	if t.IsZero() {
@@ -115,9 +155,22 @@ func sortIconHashMap(m map[string]*types.IconHashStatItem, limit int) []types.Ic
 
 // parseQuerySyntax 解析查询语法
 // 支持格式: port=80 && service=http || title="test"
+// 如果查询不包含 = 语法，则作为模糊搜索匹配 host/title/domain/service/authority
 func parseQuerySyntax(query string, filter bson.M) {
 	query = strings.TrimSpace(query)
 	if query == "" {
+		return
+	}
+
+	// 如果不包含 = 号，则视为普通文本模糊搜索
+	if !strings.Contains(query, "=") {
+		filter["$or"] = []bson.M{
+			{"host": bson.M{"$regex": query, "$options": "i"}},
+			{"authority": bson.M{"$regex": query, "$options": "i"}},
+			{"title": bson.M{"$regex": query, "$options": "i"}},
+			{"domain": bson.M{"$regex": query, "$options": "i"}},
+			{"service": bson.M{"$regex": query, "$options": "i"}},
+		}
 		return
 	}
 
@@ -378,9 +431,9 @@ func (l *AssetListLogic) AssetList(req *types.AssetListReq, workspaceId string) 
 			l.Logger.Infof("Asset %s:%d has NO orgId", a.Host, a.Port)
 		}
 
-		// 将 IconHashBytes 转换为 base64
+		// 将 IconHashBytes 转换为 base64（仅当是有效图片数据时）
 		iconData := ""
-		if len(a.IconHashBytes) > 0 {
+		if len(a.IconHashBytes) > 0 && isValidImageBytes(a.IconHashBytes) {
 			iconData = base64.StdEncoding.EncodeToString(a.IconHashBytes)
 		}
 
@@ -511,13 +564,14 @@ func (l *AssetStatLogic) AssetStat(workspaceId string) (resp *types.AssetStatRes
 					existing.Count += s.Count
 				} else {
 					iconData := ""
-					if len(s.IconData) > 0 {
+					if len(s.IconData) > 0 && isValidImageBytes(s.IconData) {
 						iconData = base64.StdEncoding.EncodeToString(s.IconData)
 					}
 					iconHashMap[s.IconHash] = &types.IconHashStatItem{
-						IconHash: s.IconHash,
-						IconData: iconData,
-						Count:    s.Count,
+						IconHash:      s.IconHash,
+						IconData:      iconData,
+						IconHashBytes: iconData,
+						Count:         s.Count,
 					}
 				}
 			}
@@ -596,13 +650,14 @@ func (l *AssetStatLogic) AssetStat(workspaceId string) (resp *types.AssetStatRes
 		topIconHash = make([]types.IconHashStatItem, 0, len(iconHashStats))
 		for _, s := range iconHashStats {
 			iconData := ""
-			if len(s.IconData) > 0 {
+			if len(s.IconData) > 0 && isValidImageBytes(s.IconData) {
 				iconData = base64.StdEncoding.EncodeToString(s.IconData)
 			}
 			topIconHash = append(topIconHash, types.IconHashStatItem{
-				IconHash: s.IconHash,
-				IconData: iconData,
-				Count:    s.Count,
+				IconHash:      s.IconHash,
+				IconData:      iconData,
+				IconHashBytes: iconData,
+				Count:         s.Count,
 			})
 		}
 

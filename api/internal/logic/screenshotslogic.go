@@ -149,6 +149,10 @@ func (l *ScreenshotsLogic) Screenshots(req *types.ScreenshotsReq, workspaceId st
 				Screenshot:   asset.Screenshot,
 				LastUpdated:  formatScreenshotTime(asset.UpdateTime),
 				Technologies: technologies,
+				HttpHeader:   asset.HttpHeader,
+				HttpBody:     asset.HttpBody,
+				Service:      asset.Service,
+				Authority:    asset.Authority,
 			}
 			allScreenshots = append(allScreenshots, item)
 		}

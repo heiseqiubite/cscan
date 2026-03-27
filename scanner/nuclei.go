@@ -688,7 +688,7 @@ func (s *NucleiScanner) convertResult(event *output.ResultEvent) *Vulnerability 
 
 	// 构建漏洞对象
 	vul := &Vulnerability{
-		Authority: fmt.Sprintf("%s:%d", host, port),
+		Authority: utils.BuildTargetWithPort(host, port),
 		Host:      host,
 		Port:      port,
 		Url:       event.Matched,

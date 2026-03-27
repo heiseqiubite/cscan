@@ -1790,6 +1790,9 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 							originalAsset.HttpBody = fpAsset.HttpBody
 							originalAsset.Server = fpAsset.Server
 							originalAsset.IconHash = fpAsset.IconHash
+							if len(fpAsset.IconData) > 0 {
+								originalAsset.IconData = fpAsset.IconData
+							}
 							originalAsset.Screenshot = fpAsset.Screenshot
 						}
 					}
@@ -4016,7 +4019,7 @@ func (w *Worker) generateHTTPAssetsFromTarget(target string) []*scanner.Asset {
 				asset := &scanner.Asset{
 					Host:      host,
 					Port:      port,
-					Authority: fmt.Sprintf("%s:%d", host, port),
+					Authority: buildAuthority(host, port),
 					IsHTTP:    isHTTP,
 				}
 				if isHTTP {
@@ -4038,7 +4041,7 @@ func (w *Worker) generateHTTPAssetsFromTarget(target string) []*scanner.Asset {
 			asset := &scanner.Asset{
 				Host:      t,
 				Port:      port,
-				Authority: fmt.Sprintf("%s:%d", t, port),
+				Authority: buildAuthority(t, port),
 				Service:   map[int]string{80: "http", 443: "https"}[port],
 				IsHTTP:    true,
 			}
@@ -4060,11 +4063,11 @@ func (w *Worker) generateHTTPAssetsFromTarget(target string) []*scanner.Asset {
 func (w *Worker) generateAssetsFromTarget(target string, portConfig *scheduler.PortScanConfig) []*scanner.Asset {
 	var assets []*scanner.Asset
 
-	// 默认端口列表
-	defaultPorts := []int{80, 443, 8080, 8443}
+	// 默认端口列表（当不进行端口扫描时，默认只探测常见的 Web 端口）
+	defaultPorts := []int{80, 443}
 
-	// 如果配置了端口，解析端口列表
-	if portConfig != nil && portConfig.Ports != "" {
+	// 只有在启用了端口扫描的情况下，才使用配置中的自定义端口列表进行资产拆分
+	if portConfig != nil && portConfig.Enable && portConfig.Ports != "" {
 		defaultPorts = parsePortList(portConfig.Ports)
 	}
 
@@ -4122,7 +4125,7 @@ func (w *Worker) generateAssetsFromTarget(target string, portConfig *scheduler.P
 			asset := &scanner.Asset{
 				Host:      t,
 				Port:      port,
-				Authority: fmt.Sprintf("%s:%d", t, port),
+				Authority: buildAuthority(t, port),
 				IsHTTP:    scanner.IsHTTPService("", port),
 			}
 			assets = append(assets, asset)
@@ -4170,7 +4173,7 @@ func (w *Worker) parseURLToAsset(urlStr string) *scanner.Asset {
 	return &scanner.Asset{
 		Host:      host,
 		Port:      port,
-		Authority: fmt.Sprintf("%s:%d", host, port),
+		Authority: buildAuthority(host, port),
 		Service:   scheme,
 		IsHTTP:    true,
 	}

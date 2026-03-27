@@ -5,14 +5,29 @@
       api="/asset/ip/list"
       statApi="/asset/ip/stat"
       batchDeleteApi="/asset/ip/batchDelete"
-      exportApi="/asset/ip/list"
       rowKey="ip"
       :columns="ipColumns"
       :searchItems="ipSearchItems"
       :statLabels="statLabels"
       selection
       @data-changed="$emit('data-changed')"
+      :searchKeys="['ip', 'domains']"
     >
+      <template #toolbar-left>
+        <el-dropdown @command="handleExport">
+          <el-button type="success" size="default">
+            {{ $t('common.export') }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="selected" :disabled="selectedRows.length === 0">{{ $t('common.exportSelected') || '导出选中项' }} ({{ selectedRows.length }})</el-dropdown-item>
+              <el-dropdown-item divided command="all">{{ $t('common.exportAll') || '导出所有' }}</el-dropdown-item>
+              <el-dropdown-item command="csv">{{ $t('common.exportCsv') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </template>
+
       <template #toolbar-right>
         <el-button type="danger" plain @click="handleClear">{{ $t('asset.clearData') }}</el-button>
       </template>
@@ -82,8 +97,9 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 import request from '@/api/request'
-import { clearAssets } from '@/api/asset'
+import { clearAssets, getAssetFilterOptions } from '@/api/asset'
 import ProTable from '@/components/common/ProTable.vue'
 
 const { t } = useI18n()
@@ -91,8 +107,11 @@ const emit = defineEmits(['data-changed'])
 
 const proTableRef = ref(null)
 const organizations = ref([])
+const filterOptions = ref({ ports: [], technologies: [], labels: [], statusCodes: [] })
 const detailVisible = ref(false)
 const currentIP = ref(null)
+
+const selectedRows = computed(() => proTableRef.value?.selectedRows || [])
 
 const statLabels = computed(() => ({
   total: t('ip.totalIPs'),
@@ -113,8 +132,22 @@ const ipColumns = computed(() => [
 
 const ipSearchItems = computed(() => [
   { label: t('ip.ipAddress'), prop: 'ip', type: 'input' },
-  { label: t('ip.port'), prop: 'port', type: 'input' },
-  { label: t('ip.service'), prop: 'service', type: 'input' },
+  { 
+    label: t('ip.port'), 
+    prop: 'port', 
+    type: 'select', 
+    options: filterOptions.value.ports,
+    multiple: true,
+    allowCreate: true
+  },
+  { 
+    label: t('ip.service'), 
+    prop: 'service', 
+    type: 'select',
+    options: filterOptions.value.technologies,
+    multiple: true,
+    allowCreate: true
+  },
   { label: t('ip.location'), prop: 'location', type: 'input' },
   {
     label: t('ip.organization'),
@@ -126,6 +159,23 @@ const ipSearchItems = computed(() => [
     ]
   }
 ])
+
+
+async function loadFilterOptions() {
+  try {
+    const res = await getAssetFilterOptions({})
+    if (res.code === 0) {
+      filterOptions.value = {
+        technologies: res.technologies || [],
+        ports: res.ports || [],
+        statusCodes: res.statusCodes || [],
+        labels: res.labels || []
+      }
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
 
 async function loadOrganizations() {
   try {
@@ -186,6 +236,72 @@ function getPortType(service) {
   return 'info'
 }
 
+async function handleExport(command) {
+  let data = []
+
+  if (command === 'selected') {
+    if (selectedRows.value.length === 0) { ElMessage.warning(t('common.pleaseSelect') || '请先选择要导出的项'); return }
+    data = selectedRows.value
+  } else {
+    ElMessage.info(t('asset.gettingAllData') || '正在获取全部数据...')
+    try {
+      const res = await request.post('/asset/ip/list', { ...proTableRef.value?.searchForm, page: 1, pageSize: 10000 })
+      if (res.code === 0) { data = res.list || [] } else { ElMessage.error(t('asset.getDataFailed')); return }
+    } catch (e) { ElMessage.error(t('asset.getDataFailed')); return }
+  }
+
+  if (data.length === 0) { ElMessage.warning(t('asset.noDataToExport')); return }
+
+  if (command === 'csv') {
+    const headers = ['IP', 'Location', 'Ports', 'Domains', 'Organization', 'UpdateTime']
+    const csvRows = [headers.join(',')]
+    for (const row of data) {
+      csvRows.push([
+        escapeCsvField(row.ip || ''),
+        escapeCsvField(row.location || ''),
+        escapeCsvField((row.ports || []).map(p => p.port + (p.service ? '/' + p.service : '')).join(';')),
+        escapeCsvField((row.domains || []).join(';')),
+        escapeCsvField(row.orgName || ''),
+        escapeCsvField(row.updateTime || '')
+      ].join(','))
+    }
+    const BOM = '\uFEFF'
+    const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `ips_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('asset.exportSuccess', { count: data.length }) || `成功导出 ${data.length} 条数据`)
+    return
+  }
+
+  // selected / all — export IP list as txt
+  const seen = new Set()
+  const exportData = []
+  for (const row of data) {
+    if (row.ip && !seen.has(row.ip)) { seen.add(row.ip); exportData.push(row.ip) }
+  }
+  if (exportData.length === 0) { ElMessage.warning(t('asset.noDataToExport')); return }
+  const blob = new Blob([exportData.join('\n')], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url; link.download = command === 'selected' ? 'ips_selected.txt' : 'ips_all.txt'
+  document.body.appendChild(link); link.click(); document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  ElMessage.success(t('asset.exportSuccess', { count: exportData.length }) || `成功导出 ${exportData.length} 条数据`)
+}
+
+function escapeCsvField(field) {
+  if (field == null) return ''
+  const str = String(field)
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return '"' + str.replace(/"/g, '""') + '"'
+  }
+  return str
+}
+
 function refresh() {
   proTableRef.value?.loadData()
 }
@@ -196,6 +312,7 @@ function handleWorkspaceChanged() {
 
 onMounted(() => {
   loadOrganizations()
+  loadFilterOptions()
   window.addEventListener('workspace-changed', handleWorkspaceChanged)
 })
 

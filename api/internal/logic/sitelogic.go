@@ -3,7 +3,9 @@ package logic
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"cscan/api/internal/logic/common"
 	"cscan/api/internal/svc"
@@ -59,19 +61,40 @@ func (l *SiteLogic) SiteList(req *types.SiteListReq, workspaceId string) (*types
 		filter := bson.M{}
 		conditions := []bson.M{webFilter}
 
-		if req.Site != "" {
+		// 通用 Query 模糊搜索（当未指定具体字段时）
+		if req.Query != "" && req.Site == "" && req.Title == "" && req.App == "" {
+			q := regexp.QuoteMeta(req.Query)
 			conditions = append(conditions, bson.M{
 				"$or": []bson.M{
-					{"authority": bson.M{"$regex": req.Site, "$options": "i"}},
-					{"host": bson.M{"$regex": req.Site, "$options": "i"}},
+					{"authority": bson.M{"$regex": q, "$options": "i"}},
+					{"host": bson.M{"$regex": q, "$options": "i"}},
+					{"title": bson.M{"$regex": q, "$options": "i"}},
+				},
+			})
+		}
+
+		if req.Site != "" {
+			siteQuery := req.Site
+			if strings.HasPrefix(siteQuery, "http://") {
+				siteQuery = strings.TrimPrefix(siteQuery, "http://")
+			} else if strings.HasPrefix(siteQuery, "https://") {
+				siteQuery = strings.TrimPrefix(siteQuery, "https://")
+			}
+			siteQuery = regexp.QuoteMeta(siteQuery)
+			conditions = append(conditions, bson.M{
+				"$or": []bson.M{
+					{"authority": bson.M{"$regex": siteQuery, "$options": "i"}},
+					{"host": bson.M{"$regex": siteQuery, "$options": "i"}},
 				},
 			})
 		}
 		if req.Title != "" {
-			conditions = append(conditions, bson.M{"title": bson.M{"$regex": req.Title, "$options": "i"}})
+			titleQuery := regexp.QuoteMeta(req.Title)
+			conditions = append(conditions, bson.M{"title": bson.M{"$regex": titleQuery, "$options": "i"}})
 		}
 		if req.App != "" {
-			conditions = append(conditions, bson.M{"app": bson.M{"$regex": req.App, "$options": "i"}})
+			appQuery := regexp.QuoteMeta(req.App)
+			conditions = append(conditions, bson.M{"app": bson.M{"$regex": appQuery, "$options": "i"}})
 		}
 		if req.HttpStatus != "" {
 			conditions = append(conditions, bson.M{"status": req.HttpStatus})

@@ -18,22 +18,12 @@
             <template #title>{{ $t('navigation.dashboard') }}</template>
           </el-menu-item>
           <!-- 资产管理分组 -->
-          <el-sub-menu index="asset-group">
-            <template #title>
-              <el-icon><Monitor /></el-icon>
-              <span>{{ $t('navigation.assetManagement') }}</span>
-            </template>
             <el-menu-item index="/asset-management">
+              <el-icon>
+               <Monitor />
+              </el-icon>
               <template #title>{{ $t('navigation.assetManagement') }}</template>
             </el-menu-item>
-            <el-menu-item index="/asset/directory">
-              <template #title>{{ $t('asset.dirManagement') }}</template>
-            </el-menu-item>
-            <el-menu-item index="/asset/vulnerability">
-              <template #title>{{ $t('asset.vulManagement') }}</template>
-            </el-menu-item>
-          </el-sub-menu>
-
           <!-- 分割线 -->
           <div class="menu-divider"></div>
 
@@ -187,7 +177,7 @@
       <el-main class="main" v-loading.fullscreen.lock="isSwitchingWorkspace" :element-loading-text="$t('common.switchingWorkspace', '正在切换工作空间...')">
         <router-view v-slot="{ Component }">
           <transition name="fade-transform" mode="out-in">
-            <component :is="Component" :key="workspaceStore.currentWorkspaceId + $route.fullPath" />
+            <component :is="Component" :key="workspaceStore.currentWorkspaceId + $route.path" />
           </transition>
         </router-view>
       </el-main>
@@ -540,17 +530,17 @@ function handleCommand(command) {
 /* fade-transform 动画 */
 .fade-transform-leave-active,
 .fade-transform-enter-active {
-  transition: all 0.3s cubic-bezier(0.55, 0, 0.1, 1);
+  transition: all 0.1s ease-out;
 }
 
 .fade-transform-enter-from {
   opacity: 0;
-  transform: translateX(-15px);
+  transform: translateX(-10px);
 }
 
 .fade-transform-leave-to {
   opacity: 0;
-  transform: translateX(15px);
+  transform: translateX(10px);
 }
 
 // 收起状态下logo图标居中

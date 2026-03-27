@@ -515,8 +515,8 @@
                   </div>
                 </el-form-item>
               </template>
-              
-              <el-form-item :label="$t('task.severityLevel')">
+
+              <el-form-item v-if="form.pocscanMode !== 'manual'" :label="$t('task.severityLevel')">
                 <el-checkbox-group v-model="form.pocscanSeverity">
                   <el-checkbox label="critical">Critical</el-checkbox>
                   <el-checkbox label="high">High</el-checkbox>

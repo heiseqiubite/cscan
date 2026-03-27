@@ -1,19 +1,103 @@
 <template>
   <el-card class="pro-table-wrapper" shadow="never">
-    <!-- Toolbar area (for search, filters, actions) -->
-    <div class="pro-table-toolbar">
-      <div class="toolbar-left">
-        <slot name="toolbar-left"></slot>
 
+
+    <!-- Global Toolbar (Top) -->
+    <div class="pro-table-top-toolbar">
+      <div class="global-search">
+        <slot name="search">
+          <el-autocomplete
+            v-if="searchPlaceholder"
+            v-model="searchQuery"
+            :fetch-suggestions="querySearch"
+            :placeholder="searchPlaceholder"
+            clearable
+            @select="handleSearch"
+            @keyup.enter="handleSearch"
+            @clear="handleSearch"
+            @input="handleSearch"
+            class="search-input"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-autocomplete>
+        </slot>
+      </div>
+
+      <div class="header-actions">
+        <el-button
+          v-if="searchItems && searchItems.length > 0"
+          @click="showFilters = !showFilters"
+        >
+          <el-icon><Filter /></el-icon>
+          {{ $t('asset.assetInventoryTab.filters') || '过滤器' }}
+        </el-button>
+      </div>
+    </div>
+
+    <!-- Filters Panel -->
+    <div v-if="showFilters && searchItems && searchItems.length > 0" class="filters-panel">
+      <el-form :model="searchForm" :inline="true" size="default">
+        <el-form-item
+          v-for="item in searchItems"
+          :key="item.prop"
+          :label="item.label"
+        >
+          <el-autocomplete
+            v-if="item.type === 'input'"
+            v-model="searchForm[item.prop]"
+            :placeholder="item.placeholder || `请输入 ${item.label}`"
+            :type="item.inputType || 'text'"
+            clearable
+            :fetch-suggestions="(qs, cb) => queryFieldSearch(qs, cb, item.prop)"
+            @select="handleSearch"
+            @keyup.enter="handleSearch"
+            @clear="handleSearch"
+            v-bind="item.props || {}"
+          />
+          <el-select
+            v-else-if="item.type === 'select'"
+            v-model="searchForm[item.prop]"
+            :placeholder="item.placeholder || `请选择 ${item.label}`"
+            clearable
+            filterable
+            :multiple="item.multiple"
+            :allow-create="item.allowCreate"
+            style="min-width: 200px"
+            @change="handleSearch"
+            @clear="handleSearch"
+            v-bind="item.props || {}"
+          >
+            <el-option
+              v-for="opt in item.options"
+              :key="typeof opt === 'object' ? opt.value : opt"
+              :label="typeof opt === 'object' ? opt.label : opt"
+              :value="typeof opt === 'object' ? opt.value : opt"
+            />
+          </el-select>
+        </el-form-item>
+
+        <div class="filter-actions-row">
+          <el-button @click="resetSearch">{{ $t('asset.assetInventoryTab.reset') || '重置' }}</el-button>
+        </div>
+      </el-form>
+
+      <slot name="stat-panel"></slot>
+    </div>
+
+    <!-- Batch Actions & Stats Toolbar -->
+    <div class="pro-table-batch-toolbar">
+      <div class="batch-left">
         <!-- Batch Delete Button -->
         <el-button
           v-if="batchDeleteApi"
           type="danger"
-          size="small"
+          size="default"
           :disabled="selectedRows.length === 0"
           @click="handleBatchDelete"
         >
-          {{ $t('common.batchDelete') || 'Batch Delete' }} ({{ selectedRows.length }})
+          {{ $t('common.batchDelete') || '批量删除' }} ({{ selectedRows.length }})
         </el-button>
 
         <!-- Export Dropdown -->
@@ -21,24 +105,27 @@
           v-if="exportApi"
           @command="handleExport"
         >
-          <el-button type="success" size="small">
-            {{ $t('common.export') || 'Export' }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          <el-button type="success" size="default">
+            {{ $t('common.export') || '导出' }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="selected" :disabled="selectedRows.length === 0">
-                {{ $t('common.exportSelected') || 'Export Selected' }} ({{ selectedRows.length }})
+                {{ $t('common.exportSelected') || '导出选中项' }} ({{ selectedRows.length }})
               </el-dropdown-item>
               <el-dropdown-item divided command="all">
-                {{ $t('common.exportAll') || 'Export All' }}
+                {{ $t('common.exportAll') || '导出所有' }}
               </el-dropdown-item>
               <el-dropdown-item command="csv">
-                {{ $t('common.exportCsv') || 'Export CSV' }}
+                {{ $t('common.exportCsv') || '导出 CSV' }}
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
 
+        <slot name="toolbar-left"></slot>
+      </div>
+      <div class="batch-right">
         <!-- Inline stats -->
         <template v-if="statApi && Object.keys(stats).length > 0">
           <el-tag
@@ -47,58 +134,14 @@
             type="info"
             effect="plain"
             class="stat-tag"
+            style="margin-left: 8px;"
           >
             {{ label }}: <span class="stat-value">{{ stats[key] !== undefined ? stats[key] : 0 }}</span>
           </el-tag>
         </template>
-      </div>
-      <div class="toolbar-right">
-        <!-- Advanced search toggle -->
-        <el-button
-          v-if="searchItems && searchItems.length > 0"
-          @click="showFilters = !showFilters"
-        >
-          <el-icon><Filter /></el-icon>
-          {{ t('asset.assetInventoryTab.filters') }}
-        </el-button>
+
         <slot name="toolbar-right"></slot>
       </div>
-    </div>
-
-    <!-- Filters Panel -->
-    <div v-if="showFilters && searchItems && searchItems.length > 0" class="filters-panel">
-      <el-form :model="searchForm" :inline="true" size="small">
-        <el-form-item
-          v-for="item in searchItems"
-          :key="item.prop"
-          :label="item.label"
-        >
-          <el-input
-            v-if="item.type === 'input'"
-            v-model="searchForm[item.prop]"
-            :placeholder="`Enter ${item.label}`"
-            clearable
-          />
-          <el-select
-            v-else-if="item.type === 'select'"
-            v-model="searchForm[item.prop]"
-            :placeholder="`Select ${item.label}`"
-            clearable
-            style="width: 100%"
-          >
-            <el-option
-              v-for="opt in item.options"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="resetSearch">Reset</el-button>
-          <el-button type="primary" @click="handleSearch">Search</el-button>
-        </el-form-item>
-      </el-form>
     </div>
 
     <!-- Main Table -->
@@ -140,12 +183,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Filter } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import request from '@/api/request'
+import { debounce } from 'lodash-es'
 
 defineOptions({
   name: 'ProTable',
@@ -153,6 +197,10 @@ defineOptions({
 })
 
 const props = defineProps({
+  searchPlaceholder: {
+    type: String,
+    default: '搜索主机名、IP或标题...'
+  },
   api: {
     type: String,
     default: ''
@@ -185,6 +233,10 @@ const props = defineProps({
     type: Function,
     default: null
   },
+  searchKeys: {
+    type: Array,
+    default: () => []
+  },
   rowKey: {
     type: String,
     default: 'id'
@@ -199,11 +251,13 @@ const router = useRouter()
 const route = useRoute()
 
 // State
+const searchQuery = ref('')
 const showFilters = ref(false)
 const loading = ref(false)
 const tableData = ref([])
 const selectedRows = ref([])
 const stats = ref({})
+const isInitialLoad = ref(true)
 const pagination = reactive({
   page: 1,
   pageSize: 10,
@@ -217,46 +271,85 @@ const emit = defineEmits(['data-changed'])
 // Placeholder for advanced search form, currently synced with url
 const searchForm = reactive({})
 
+// Keys that ProTable should never read from or write to URL (managed by parent components)
+const EXTERNAL_QUERY_KEYS = new Set(['tab', 'subTab'])
+
+// Get the set of valid search field keys from searchItems prop
+function getSearchItemKeys() {
+  return new Set((props.searchItems || []).map(item => item.prop))
+}
+
 // Initialize state from URL query
 function initQueryFromUrl() {
   const query = route.query
   if (query.page) pagination.page = parseInt(query.page) || 1
   if (query.pageSize) pagination.pageSize = parseInt(query.pageSize) || 10
 
-  // Load remaining query parameters into searchForm
+  const searchItemKeys = getSearchItemKeys()
+
   for (const key in query) {
-    if (key !== 'page' && key !== 'pageSize') {
+    if (key === 'page' || key === 'pageSize' || EXTERNAL_QUERY_KEYS.has(key)) {
+      continue
+    }
+    if (key === 'query') {
+      searchQuery.value = query[key]
+    } else if (searchItemKeys.size === 0 || searchItemKeys.has(key)) {
       searchForm[key] = query[key]
     }
   }
 }
 
-// Sync state to URL query
+// Sync ProTable state to URL query, preserving all external params
 function syncQueryToUrl() {
-  const query = {
+  const proTableParams = {
     page: pagination.page,
     pageSize: pagination.pageSize,
+    query: searchQuery.value,
     ...searchForm
   }
 
-  // Remove empty values to clean up URL
-  Object.keys(query).forEach(key => {
-    if (query[key] === '' || query[key] === null || query[key] === undefined) {
-      delete query[key]
+  // Remove empty ProTable values
+  Object.keys(proTableParams).forEach(key => {
+    if (proTableParams[key] === '' || proTableParams[key] === null || proTableParams[key] === undefined) {
+      delete proTableParams[key]
     }
   })
 
-  router.replace({ path: route.path, query }).catch(() => {})
+  // Start from current URL query to preserve tab/subTab and any other external params,
+  // then override only ProTable-owned keys,
+  // and also clean up any stale ProTable keys (e.g. old searchForm fields no longer set)
+  const currentQuery = { ...route.query }
+
+  // Remove old ProTable-managed keys from currentQuery before merging
+  // (page, pageSize, query, and all searchItems props)
+  const searchItemKeys = getSearchItemKeys()
+  Object.keys(currentQuery).forEach(key => {
+    if (key === 'page' || key === 'pageSize' || key === 'query' || searchItemKeys.has(key)) {
+      delete currentQuery[key]
+    }
+  })
+
+  const finalQuery = { ...currentQuery, ...proTableParams }
+
+  // Clean up empty values
+  Object.keys(finalQuery).forEach(key => {
+    if (finalQuery[key] === '' || finalQuery[key] === null || finalQuery[key] === undefined) {
+      delete finalQuery[key]
+    }
+  })
+
+  router.replace({ path: route.path, query: finalQuery }).catch(() => {})
 }
 
 // Data fetching
 async function loadStats() {
   if (!props.statApi) return
   try {
-    const payload = { ...searchForm }
+    const payload = { query: searchQuery.value,
+      ...searchForm }
     const res = await request.post(props.statApi, payload)
     if (res.code === 0) {
-      stats.value = res.data || {}
+      stats.value = res.data || res.stat || res || {}
     }
   } catch (error) {
     console.error('Failed to load stats:', error)
@@ -269,13 +362,32 @@ async function loadData() {
   if (!props.api) return
 
   loading.value = true
-  syncQueryToUrl()
+
+  // Skip URL sync on initial mount to avoid race condition with parent components
+  // (e.g. AssetInventoryTab writing subTab via async router.replace)
+  if (!isInitialLoad.value) {
+    syncQueryToUrl()
+  }
+  isInitialLoad.value = false
 
   try {
     const payload = {
       page: pagination.page,
       pageSize: pagination.pageSize,
+      query: searchQuery.value,
       ...searchForm
+    }
+
+    // Cast specific fields to Number if they are defined as numbers in searchItems
+    if (props.searchItems) {
+      props.searchItems.forEach(item => {
+        if (item.inputType === 'number' && payload[item.prop] !== undefined && payload[item.prop] !== '') {
+          const numVal = Number(payload[item.prop])
+          if (!isNaN(numVal)) {
+            payload[item.prop] = numVal
+          }
+        }
+      })
     }
 
     const res = await request.post(props.api, payload)
@@ -290,10 +402,88 @@ async function loadData() {
   }
 }
 
+// Search autocomplete based on current table data
+function querySearch(queryString, cb) {
+  if (!tableData.value || tableData.value.length === 0) {
+    cb([])
+    return
+  }
+
+  const uniqueValues = new Set()
+  tableData.value.forEach(row => {
+    const keysToSearch = props.searchKeys && props.searchKeys.length > 0 ? props.searchKeys : Object.keys(row)
+
+    for (const key of keysToSearch) {
+      const val = row[key]
+      if (val !== undefined && val !== null && val !== '') {
+        if (typeof val === 'string' || typeof val === 'number') {
+          // Skip long IDs and dates
+          const strVal = String(val)
+          if (strVal.length < 50 && !strVal.includes('T00:00:00') && key !== 'id' && key !== 'workspaceId') {
+            uniqueValues.add(strVal)
+          }
+        } else if (Array.isArray(val)) {
+          val.forEach(v => {
+            if (v && typeof v === 'object' && v.ip) uniqueValues.add(String(v.ip))
+            else if (v && typeof v === 'object' && v.host) uniqueValues.add(String(v.host))
+            else if (typeof v !== 'object') uniqueValues.add(String(v))
+          })
+        }
+      }
+    }
+  })
+
+  const results = Array.from(uniqueValues).map(v => ({ value: String(v) }))
+  if (queryString) {
+    const lowerQuery = String(queryString).toLowerCase()
+    cb(results.filter(item => item.value.toLowerCase().includes(lowerQuery)).slice(0, 20))
+  } else {
+    cb(results.slice(0, 20))
+  }
+}
+
 // Reset and reload helper
-function handleSearch() {
+const handleSearch = debounce(() => {
   pagination.page = 1
   loadData()
+}, 300)
+
+// 监听全局搜索框内容变化，自动触发查询（与组件事件解耦）
+watch(searchQuery, () => {
+  handleSearch()
+})
+
+function queryFieldSearch(queryString, cb, prop) {
+  if (!tableData.value || tableData.value.length === 0) {
+    cb([])
+    return
+  }
+
+  const uniqueValues = new Set()
+  tableData.value.forEach(row => {
+    let val = row[prop]
+
+    if (val !== undefined && val !== null && val !== '') {
+      // 针对特殊字段展开数组匹配
+      if (Array.isArray(val)) {
+        val.forEach(v => {
+          if (v && typeof v === 'object' && v.ip) uniqueValues.add(String(v.ip))
+          else if (v && typeof v === 'object' && v.host) uniqueValues.add(String(v.host))
+          else if (typeof v !== 'object') uniqueValues.add(String(v))
+        })
+      } else {
+        uniqueValues.add(String(val))
+      }
+    }
+  })
+
+  const results = Array.from(uniqueValues).map(v => ({ value: String(v) }))
+  if (queryString) {
+    const lowerQuery = String(queryString).toLowerCase()
+    cb(results.filter(item => item.value.toLowerCase().includes(lowerQuery)).slice(0, 20))
+  } else {
+    cb(results.slice(0, 20))
+  }
 }
 
 // Reset advanced search
@@ -360,7 +550,8 @@ async function handleExport(command) {
     ElMessage.info(t('common.gettingAllData') || 'Getting all data...')
     try {
       const res = await request.post(props.exportApi || props.api, {
-        ...searchForm, page: 1, pageSize: 10000
+        query: searchQuery.value,
+      ...searchForm, page: 1, pageSize: 10000
       })
       if (res.code === 0) {
         data = res.list || []
@@ -421,7 +612,8 @@ async function handleExport(command) {
     ElMessage.info(t('common.gettingAllData') || 'Getting all data...')
     try {
       const res = await request.post(props.exportApi || props.api, {
-        ...searchForm, page: 1, pageSize: 10000
+        query: searchQuery.value,
+      ...searchForm, page: 1, pageSize: 10000
       })
       if (res.code === 0) {
         data = res.list || []
@@ -498,6 +690,7 @@ onUnmounted(() => {
 // Expose methods and state to parent component
 defineExpose({
   tableData,
+  selectedRows,
   loading,
   pagination,
   searchForm,
@@ -522,6 +715,27 @@ defineExpose({
 }
 
 
+.pro-table-top-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+
+  .global-search {
+    flex: 1;
+    max-width: 500px;
+
+    .search-input {
+      width: 100%;
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+  }
+}
+
 .filters-panel {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
@@ -529,18 +743,23 @@ defineExpose({
   padding: 16px;
   margin-bottom: 16px;
 
-  :deep(.el-select) {
-    min-width: 200px;
+  :deep(.el-form-item) {
+    margin-bottom: 16px;
+  }
+
+  .filter-actions-row {
+    margin-top: 8px;
+    display: block;
   }
 }
 
-.pro-table-toolbar {
+.pro-table-batch-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
 
-  .toolbar-left, .toolbar-right {
+  .batch-left, .batch-right {
     display: flex;
     align-items: center;
     gap: 12px;
