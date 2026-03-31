@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -224,11 +225,6 @@ func (s *Scheduler) PushTask(ctx context.Context, task *TaskInfo) error {
 	now := time.Now()
 	task.CreateTime = now.Local().Format("2006-01-02 15:04:05")
 
-	data, err := json.Marshal(task)
-	if err != nil {
-		return err
-	}
-
 	// 使用统一的优先级分数计算
 	score := s.calculatePriorityScore(task.Priority, now)
 
@@ -236,26 +232,27 @@ func (s *Scheduler) PushTask(ctx context.Context, task *TaskInfo) error {
 	if len(task.Workers) > 0 {
 		pipe := s.rdb.Pipeline()
 		for _, workerName := range task.Workers {
+			taskCopy := *task
+			taskCopy.Workers = []string{workerName}
+			data, _ := json.Marshal(taskCopy)
 			workerQueueKey := s.GetWorkerQueueKey(workerName)
 			pipe.ZAdd(ctx, workerQueueKey, redis.Z{
 				Score:  score,
-				Member: data,
+				Member: string(data),
 			})
 		}
-		_, err = pipe.Exec(ctx)
+		_, err := pipe.Exec(ctx)
 		return err
 	}
 
+	data, _ := json.Marshal(task)
 	// 没有指定 Worker，推送到公共队列
 	return s.rdb.ZAdd(ctx, s.queueKey, redis.Z{
 		Score:  score,
-		Member: data,
+		Member: string(data),
 	}).Err()
 }
 
-// PushTaskBatch 批量推送任务到队列（使用 Pipeline 提高性能）
-// 如果任务指定了 Workers，则推送到每个 Worker 的专属队列
-// 否则推送到公共队列
 func (s *Scheduler) PushTaskBatch(ctx context.Context, tasks []*TaskInfo) error {
 	if len(tasks) == 0 {
 		return nil
@@ -279,11 +276,6 @@ func (s *Scheduler) PushTaskBatch(ctx context.Context, tasks []*TaskInfo) error 
 		}
 		task.CreateTime = baseTime.Local().Format("2006-01-02 15:04:05")
 
-		data, err := json.Marshal(task)
-		if err != nil {
-			continue
-		}
-
 		// 使用统一的优先级分数计算
 		// 同一批次的任务按顺序递增分数，保持顺序
 		score := s.calculatePriorityScore(task.Priority, baseTime) + float64(i)*0.001
@@ -291,17 +283,21 @@ func (s *Scheduler) PushTaskBatch(ctx context.Context, tasks []*TaskInfo) error 
 		// 如果指定了 Workers，推送到每个 Worker 的专属队列
 		if len(task.Workers) > 0 {
 			for _, workerName := range task.Workers {
+				taskCopy := *task
+				taskCopy.Workers = []string{workerName}
+				data, _ := json.Marshal(taskCopy)
 				workerQueueKey := s.GetWorkerQueueKey(workerName)
 				pipe.ZAdd(ctx, workerQueueKey, redis.Z{
 					Score:  score,
-					Member: data,
+					Member: string(data),
 				})
 			}
 		} else {
+			data, _ := json.Marshal(task)
 			// 没有指定 Worker，推送到公共队列
 			pipe.ZAdd(ctx, s.queueKey, redis.Z{
 				Score:  score,
-				Member: data,
+				Member: string(data),
 			})
 		}
 	}
@@ -310,7 +306,6 @@ func (s *Scheduler) PushTaskBatch(ctx context.Context, tasks []*TaskInfo) error 
 	return err
 }
 
-// PopTask 从队列获取任务
 func (s *Scheduler) PopTask(ctx context.Context) (*TaskInfo, error) {
 	startTime := time.Now()
 	defer func() {
@@ -463,9 +458,9 @@ type DirScanConfig struct {
 	FilterRegex     string `json:"filterRegex"`     // 按正则过滤
 	MatcherMode     string `json:"matcherMode"`     // 匹配模式 and/or
 	FilterMode      string `json:"filterMode"`      // 过滤模式 and/or
-	Rate            int    `json:"rate"`             // 每秒请求速率限制
-	Recursion       bool   `json:"recursion"`        // 递归扫描
-	RecursionDepth  int    `json:"recursionDepth"`   // 递归深度
+	Rate            int    `json:"rate"`            // 每秒请求速率限制
+	Recursion       bool   `json:"recursion"`       // 递归扫描
+	RecursionDepth  int    `json:"recursionDepth"`  // 递归深度
 }
 
 type PortScanConfig struct {
@@ -660,13 +655,24 @@ func (s *Scheduler) GetAvailableWorkers(ctx context.Context) ([]*WorkerLoad, err
 		}
 	}
 
+	// 预计算负载分数，避免排序比较时重复计算 O(n log n) 次 LoadScore()
+	type workerWithScore struct {
+		load  *WorkerLoad
+		score float64
+	}
+	availableWithScores := make([]workerWithScore, 0, len(available))
+	for _, w := range available {
+		availableWithScores = append(availableWithScores, workerWithScore{
+			load:  w,
+			score: w.LoadScore(),
+		})
+	}
 	// 按负载分数排序（升序，负载低的在前）
-	for i := 0; i < len(available)-1; i++ {
-		for j := i + 1; j < len(available); j++ {
-			if available[i].LoadScore() > available[j].LoadScore() {
-				available[i], available[j] = available[j], available[i]
-			}
-		}
+	sort.Slice(availableWithScores, func(i, j int) bool {
+		return availableWithScores[i].score < availableWithScores[j].score
+	})
+	for i, item := range availableWithScores {
+		available[i] = item.load
 	}
 
 	return available, nil

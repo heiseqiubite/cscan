@@ -1162,8 +1162,13 @@ func (s *FingerprintScanner) takeScreenshot(ctx context.Context, targetUrl strin
 		}),
 		// 获取页面高度
 		chromedp.Evaluate(`document.body.scrollHeight`, &pageHeight),
-		// 设置视口大小以适应页面内容
-		chromedp.EmulateViewport(1920, pageHeight),
+		// 设置视口大小以适应页面内容 (由于强求传递值，必须放在 ActionFunc 中延迟执行)
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			if pageHeight < 1080 {
+				pageHeight = 1080
+			}
+			return chromedp.EmulateViewport(1920, pageHeight).Do(ctx)
+		}),
 		// 滚动到页面顶部确保完整截图
 		chromedp.Evaluate(`window.scrollTo(0, 0)`, nil),
 		// 再次等待渲染完成

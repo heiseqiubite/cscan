@@ -408,7 +408,7 @@ func (s *SubfinderScanner) resolveDomainsWithResolver(ctx context.Context, domai
 				if ctx.Err() != nil {
 					return
 				}
-				if asset := s.resolveSingleDomain(domain, resolver); asset != nil {
+				if asset := resolveSingleDomainAsset(domain, resolver); asset != nil {
 					mu.Lock()
 					assets = append(assets, asset)
 					mu.Unlock()
@@ -438,8 +438,7 @@ func (s *SubfinderScanner) resolveDomainsWithResolver(ctx context.Context, domai
 	return assets
 }
 
-// resolveSingleDomain 解析单个域名 - 提取公共逻辑
-func (s *SubfinderScanner) resolveSingleDomain(domain string, resolver dnsResolver) *Asset {
+func resolveSingleDomainAsset(domain string, resolver dnsResolver) *Asset {
 	ips, err := resolver.resolve(domain)
 	if err != nil || len(ips) == 0 {
 		return nil
@@ -481,6 +480,11 @@ func (s *SubfinderScanner) resolveSingleDomain(domain string, resolver dnsResolv
 	}
 
 	return asset
+}
+
+// resolveSingleDomain 解析单个域名 - 提取公共逻辑
+func (s *SubfinderScanner) resolveSingleDomain(domain string, resolver dnsResolver) *Asset {
+	return resolveSingleDomainAsset(domain, resolver)
 }
 
 // BuildProviderConfig 构建Subfinder provider配置文件内容

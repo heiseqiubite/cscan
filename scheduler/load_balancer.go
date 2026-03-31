@@ -202,66 +202,31 @@ func (lb *LoadBalancer) SelectWorkersForTask(ctx context.Context, count int) ([]
 // DistributeTask 分发任务到最佳Worker
 // 返回选中的Worker名称
 func (lb *LoadBalancer) DistributeTask(ctx context.Context, scheduler *Scheduler, task *TaskInfo) (string, error) {
-	// 如果任务已指定Worker，直接使用
+	// 如果任务已指定Worker，优先保证
 	if len(task.Workers) > 0 {
 		return task.Workers[0], scheduler.PushTask(ctx, task)
 	}
 
-	// 选择最佳Worker
-	worker, err := lb.SelectBestWorker(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	// 如果没有可用Worker，推送到公共队列
-	if worker == nil {
-		return "", scheduler.PushTask(ctx, task)
-	}
-
-	// 推送到选中Worker的专属队列
-	task.Workers = []string{worker.WorkerName}
+	// 不再预先绑定Worker到任务上，完全采用拉取模型（Pull），让空闲Worker通过原子的ZPopMin从公共队列竞争获取任务
+	// 直接推送到公共队列
 	if err := scheduler.PushTask(ctx, task); err != nil {
 		return "", err
 	}
 
-	return worker.WorkerName, nil
+	return "", nil
 }
 
-// DistributeTaskBatch 批量分发任务（负载均衡）
 func (lb *LoadBalancer) DistributeTaskBatch(ctx context.Context, scheduler *Scheduler, tasks []*TaskInfo) error {
 	if len(tasks) == 0 {
 		return nil
 	}
 
-	// 获取可用Worker
-	workers, err := lb.GetAvailableWorkers(ctx, nil)
-	if err != nil {
-		// 如果获取失败，推送到公共队列
-		return scheduler.PushTaskBatch(ctx, tasks)
-	}
-
-	if len(workers) == 0 {
-		// 没有可用Worker，推送到公共队列
-		return scheduler.PushTaskBatch(ctx, tasks)
-	}
-
-	// 按负载均衡分配任务
-	workerIndex := 0
-	for _, task := range tasks {
-		// 如果任务已指定Worker，跳过
-		if len(task.Workers) > 0 {
-			continue
-		}
-
-		// 轮询分配给可用Worker
-		task.Workers = []string{workers[workerIndex].WorkerName}
-		workerIndex = (workerIndex + 1) % len(workers)
-	}
-
+	// 舍弃原先的Round-Robin(轮询)预分配逻辑
+	// 现改为真实的 Pull 消费模型，所有任务统一进入 publicQueueKey(公共队列)
+	// Worker 根据自身并发槽位空闲情况(adaptive_scheduler)原子获取任务
 	return scheduler.PushTaskBatch(ctx, tasks)
 }
 
-// RemoveWorker 移除Worker（下线时调用）
 func (lb *LoadBalancer) RemoveWorker(ctx context.Context, workerName string) error {
 	// 从Redis删除
 	if err := lb.rdb.HDel(ctx, lb.workerLoadKey, workerName).Err(); err != nil {

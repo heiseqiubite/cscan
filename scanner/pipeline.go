@@ -140,11 +140,11 @@ func (p *Pipeline) Execute(ctx context.Context, input *StageInput) (*ScanResult,
 
 		// 合并结果
 		if len(output.Assets) > 0 {
-			result.Assets = append(result.Assets, output.Assets...)
-			input.Assets = append(input.Assets, output.Assets...) // 传递给下一阶段
+			// result.Assets = append(result.Assets, output.Assets...)
+			// input.Assets = append(input.Assets, output.Assets...) // 传递给下一阶段
 		}
 		if len(output.Vulnerabilities) > 0 {
-			result.Vulnerabilities = append(result.Vulnerabilities, output.Vulnerabilities...)
+			// result.Vulnerabilities = append(result.Vulnerabilities, output.Vulnerabilities...)
 		}
 
 		// 合并数据

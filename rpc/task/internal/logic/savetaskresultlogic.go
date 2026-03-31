@@ -176,7 +176,12 @@ func (l *SaveTaskResultLogic) SaveTaskResult(in *pb.SaveTaskResultReq) (*pb.Save
 					Location: ip.Location,
 				})
 			}
+		} else if utils.IsIPv4(asset.Host) {
+			asset.Ip.IpV4 = append(asset.Ip.IpV4, model.IPV4{
+				IPName: asset.Host,
+			})
 		}
+
 		if len(pbAsset.Ipv6) > 0 {
 			for _, ip := range pbAsset.Ipv6 {
 				asset.Ip.IpV6 = append(asset.Ip.IpV6, model.IPV6{
@@ -184,6 +189,10 @@ func (l *SaveTaskResultLogic) SaveTaskResult(in *pb.SaveTaskResultReq) (*pb.Save
 					Location: ip.Location,
 				})
 			}
+		} else if utils.IsIPv6(asset.Host) {
+			asset.Ip.IpV6 = append(asset.Ip.IpV6, model.IPV6{
+				IPName: asset.Host,
+			})
 		}
 
 		// 处理CName
@@ -195,6 +204,24 @@ func (l *SaveTaskResultLogic) SaveTaskResult(in *pb.SaveTaskResultReq) (*pb.Save
 		if asset.Category == "domain" || !utils.IsIPAddress(asset.Host) {
 			asset.Domain = asset.Host
 		}
+
+		// ========= 尝试继承基础域名的IP和CName =========
+		if asset.Port > 0 && len(asset.Ip.IpV4) == 0 && len(asset.Ip.IpV6) == 0 && !utils.IsIPAddress(asset.Host) {
+			baseAsset, _ := assetModel.FindByAuthorityOnly(l.ctx, asset.Host)
+			if baseAsset != nil {
+				asset.Ip = baseAsset.Ip       // 继承 IP 数组
+				if asset.CName == "" {
+					asset.CName = baseAsset.CName // 继承 CName
+				}
+				if asset.Domain == "" {
+					asset.Domain = baseAsset.Domain
+				}
+				if asset.OrgId == "" {
+					asset.OrgId = baseAsset.OrgId
+				}
+			}
+		}
+		// ===============================================
 
 		// 检查是否已存在
 		var existing *model.Asset

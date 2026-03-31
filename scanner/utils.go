@@ -148,6 +148,10 @@ func ParseTargetsForFingerprint(target string) []*ParsedTarget {
 // GenerateAssetsFromTargets 从用户输入的目标生成资产列表
 // 用于当用户只勾选部分扫描模块时，直接使用输入目标进行扫描
 func GenerateAssetsFromTargets(target string) []*Asset {
+	return generateAssetsFromTargetsWithResolver(target, &stdlibResolver{})
+}
+
+func generateAssetsFromTargetsWithResolver(target string, resolver dnsResolver) []*Asset {
 	var assets []*Asset
 
 	lines := strings.Split(target, "\n")
@@ -167,7 +171,7 @@ func GenerateAssetsFromTargets(target string) []*Asset {
 		// 用户明确指定了协议或端口时，只生成对应的单个资产
 		if info.Protocol != "" || info.HasPort {
 			pt := parseSingleTarget(info)
-			assets = append(assets, buildAssetFromParsed(pt, category))
+			assets = append(assets, buildAssetFromParsed(pt, category, resolver))
 		} else {
 			// 用户输入纯域名/IP（无协议无端口），默认传不带端口的目标
 			asset := &Asset{
@@ -179,7 +183,7 @@ func GenerateAssetsFromTargets(target string) []*Asset {
 				Authority: info.Host,
 				Service:   "",
 			}
-			assets = append(assets, asset)
+			assets = append(assets, enrichAssetWithDNS(asset, resolver))
 		}
 	}
 
@@ -219,7 +223,7 @@ func parseSingleTarget(info *utils.TargetInfo) *ParsedTarget {
 }
 
 // buildAssetFromParsed 从 ParsedTarget 构建 Asset
-func buildAssetFromParsed(pt *ParsedTarget, category string) *Asset {
+func buildAssetFromParsed(pt *ParsedTarget, category string, resolver dnsResolver) *Asset {
 	asset := &Asset{
 		Host:     pt.Host,
 		Port:     pt.Port,
@@ -240,6 +244,22 @@ func buildAssetFromParsed(pt *ParsedTarget, category string) *Asset {
 		asset.Path = pt.Path
 	}
 
+	return enrichAssetWithDNS(asset, resolver)
+}
+
+func enrichAssetWithDNS(asset *Asset, resolver dnsResolver) *Asset {
+	if asset == nil || asset.Host == "" || getCategory(asset.Host) != "domain" || resolver == nil {
+		return asset
+	}
+
+	resolved := resolveSingleDomainAsset(asset.Host, resolver)
+	if resolved == nil {
+		return asset
+	}
+
+	asset.IPV4 = resolved.IPV4
+	asset.IPV6 = resolved.IPV6
+	asset.CName = resolved.CName
 	return asset
 }
 
