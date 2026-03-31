@@ -29,25 +29,25 @@ type TerminalConfig struct {
 func DefaultTerminalConfig() *TerminalConfig {
 	// 默认命令黑名单 - 危险命令
 	defaultBlacklist := []string{
-		`^rm\s+(-rf?|--recursive)\s+/\s*$`,       // rm -rf /
-		`^rm\s+(-rf?|--recursive)\s+/\*`,         // rm -rf /*
-		`^rm\s+(-rf?|--recursive)\s+~`,           // rm -rf ~
-		`^shutdown`,                               // shutdown
-		`^reboot`,                                 // reboot
-		`^halt`,                                   // halt
-		`^poweroff`,                               // poweroff
-		`^init\s+0`,                               // init 0
-		`^init\s+6`,                               // init 6
-		`^mkfs`,                                   // mkfs (format disk)
-		`^dd\s+.*of=/dev/`,                        // dd to device
-		`^:\(\)\{.*\}`,                            // fork bomb
-		`>\s*/dev/sd[a-z]`,                        // write to disk device
-		`>\s*/dev/nvme`,                           // write to nvme device
-		`^chmod\s+(-R\s+)?777\s+/\s*$`,            // chmod 777 /
-		`^chown\s+(-R\s+)?.*\s+/\s*$`,             // chown /
-		`^format\s+[a-zA-Z]:`,                     // Windows format drive
-		`^del\s+/[sS]\s+/[qQ]\s+[a-zA-Z]:\\`,     // Windows del /s /q C:\
-		`^rd\s+/[sS]\s+/[qQ]\s+[a-zA-Z]:\\`,      // Windows rd /s /q C:\
+		`^rm\s+(-rf?|--recursive)\s+/\s*$`,   // rm -rf /
+		`^rm\s+(-rf?|--recursive)\s+/\*`,     // rm -rf /*
+		`^rm\s+(-rf?|--recursive)\s+~`,       // rm -rf ~
+		`^shutdown`,                          // shutdown
+		`^reboot`,                            // reboot
+		`^halt`,                              // halt
+		`^poweroff`,                          // poweroff
+		`^init\s+0`,                          // init 0
+		`^init\s+6`,                          // init 6
+		`^mkfs`,                              // mkfs (format disk)
+		`^dd\s+.*of=/dev/`,                   // dd to device
+		`^:\(\)\{.*\}`,                       // fork bomb
+		`>\s*/dev/sd[a-z]`,                   // write to disk device
+		`>\s*/dev/nvme`,                      // write to nvme device
+		`^chmod\s+(-R\s+)?777\s+/\s*$`,       // chmod 777 /
+		`^chown\s+(-R\s+)?.*\s+/\s*$`,        // chown /
+		`^format\s+[a-zA-Z]:`,                // Windows format drive
+		`^del\s+/[sS]\s+/[qQ]\s+[a-zA-Z]:\\`, // Windows del /s /q C:\
+		`^rd\s+/[sS]\s+/[qQ]\s+[a-zA-Z]:\\`,  // Windows rd /s /q C:\
 	}
 
 	workingDir, _ := os.Getwd()
@@ -572,7 +572,7 @@ type TerminalCloseResponse struct {
 type TerminalInputRequest struct {
 	RequestId string `json:"requestId"`
 	SessionId string `json:"sessionId"`
-	Data      string `json:"data"` // Base64编码的输入数据
+	Data      string `json:"data"`              // Base64编码的输入数据
 	Command   string `json:"command,omitempty"` // 可选：直接执行的命令
 }
 

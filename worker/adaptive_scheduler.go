@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // ScheduleMode 调度模式
@@ -39,15 +41,17 @@ func (m ScheduleMode) String() string {
 
 // ResourceMetrics 资源指标
 type ResourceMetrics struct {
-	CPUPercent    float64   // CPU使用率
-	MemPercent    float64   // 内存使用率
-	CPUCores      int       // CPU核心数
-	TotalMemoryMB uint64    // 总内存(MB)
-	AvailMemoryMB uint64    // 可用内存(MB)
-	LoadAvg1      float64   // 1分钟负载
-	LoadAvg5      float64   // 5分钟负载
-	LoadAvg15     float64   // 15分钟负载
-	Timestamp     time.Time // 采集时间
+	CPUPercent        float64   // CPU使用率
+	MemPercent        float64   // 系统内存使用率
+	ProcessMemMB      uint64    // Worker 进程内存(MB)
+	ProcessMemPercent float32   // Worker 进程内存占系统总内存百分比
+	CPUCores          int       // CPU核心数
+	TotalMemoryMB     uint64    // 总内存(MB)
+	AvailMemoryMB     uint64    // 可用内存(MB)
+	LoadAvg1          float64   // 1分钟负载
+	LoadAvg5          float64   // 5分钟负载
+	LoadAvg15         float64   // 15分钟负载
+	Timestamp         time.Time // 采集时间
 }
 
 // AdaptiveSchedulerConfig 自适应调度器配置
@@ -58,12 +62,15 @@ type AdaptiveSchedulerConfig struct {
 	MaxConcurrency  int // 最大并发数（不超过基础并发数）
 
 	// 资源阈值配置
-	CPULowThreshold      float64 // CPU低负载阈值（可以增加并发）
-	CPUHighThreshold     float64 // CPU高负载阈值（需要减少并发）
-	CPUCriticalThreshold float64 // CPU危急阈值（立即限流）
-	MemLowThreshold      float64 // 内存低负载阈值
-	MemHighThreshold     float64 // 内存高负载阈值
-	MemCriticalThreshold float64 // 内存危急阈值
+	CPULowThreshold               float64 // CPU低负载阈值（可以增加并发）
+	CPUHighThreshold              float64 // CPU高负载阈值（需要减少并发）
+	CPUCriticalThreshold          float64 // CPU危急阈值（立即限流）
+	MemLowThreshold               float64 // 系统内存低负载阈值
+	MemHighThreshold              float64 // 系统内存高负载阈值
+	MemCriticalThreshold          float64 // 系统内存危急阈值
+	ProcessMemLowThresholdMB      uint64  // Worker进程内存低负载阈值(MB)
+	ProcessMemHighThresholdMB     uint64  // Worker进程内存高负载阈值(MB)
+	ProcessMemCriticalThresholdMB uint64  // Worker进程内存危急阈值(MB)
 
 	// 调度参数
 	SampleInterval    time.Duration // 资源采样间隔
@@ -92,6 +99,7 @@ func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfi
 	// 根据硬件配置分级
 	var cpuLow, cpuHigh, cpuCritical float64
 	var memLow, memHigh, memCritical float64
+	var processMemLowMB, processMemHighMB, processMemCriticalMB uint64
 
 	if cpuCores <= 4 || totalMemMB <= 4096 {
 		// 低配：放宽所有阈值，避免频繁限流
@@ -101,6 +109,9 @@ func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfi
 		memLow = 60.0
 		memHigh = 82.0
 		memCritical = 93.0
+		processMemLowMB = 512
+		processMemHighMB = 1024
+		processMemCriticalMB = 1536
 	} else if cpuCores <= 8 && totalMemMB <= 16384 {
 		// 中配：适度放宽
 		cpuLow = 45.0
@@ -109,6 +120,9 @@ func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfi
 		memLow = 55.0
 		memHigh = 78.0
 		memCritical = 92.0
+		processMemLowMB = 1024
+		processMemHighMB = 2048
+		processMemCriticalMB = 3072
 	} else {
 		// 高配：使用原始阈值
 		cpuLow = 40.0
@@ -117,27 +131,33 @@ func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfi
 		memLow = 50.0
 		memHigh = 75.0
 		memCritical = 90.0
+		processMemLowMB = 1536
+		processMemHighMB = 3072
+		processMemCriticalMB = 4096
 	}
 
 	return &AdaptiveSchedulerConfig{
-		BaseConcurrency:      baseConcurrency,
-		MinConcurrency:       1,
-		MaxConcurrency:       baseConcurrency,
-		CPULowThreshold:      cpuLow,
-		CPUHighThreshold:     cpuHigh,
-		CPUCriticalThreshold: cpuCritical,
-		MemLowThreshold:      memLow,
-		MemHighThreshold:     memHigh,
-		MemCriticalThreshold: memCritical,
-		SampleInterval:       time.Second,
-		AdjustInterval:       5 * time.Second,
-		HistorySize:          60,
-		SmoothingFactor:      0.3,
-		ScaleUpCooldown:      30 * time.Second,
-		ScaleDownCooldown:    10 * time.Second,
-		MinPullInterval:      3 * time.Second,
-		MaxPullInterval:      10 * time.Second,
-		IdleMultiplier:       2.0,
+		BaseConcurrency:               baseConcurrency,
+		MinConcurrency:                1,
+		MaxConcurrency:                baseConcurrency,
+		CPULowThreshold:               cpuLow,
+		CPUHighThreshold:              cpuHigh,
+		CPUCriticalThreshold:          cpuCritical,
+		MemLowThreshold:               memLow,
+		MemHighThreshold:              memHigh,
+		MemCriticalThreshold:          memCritical,
+		ProcessMemLowThresholdMB:      processMemLowMB,
+		ProcessMemHighThresholdMB:     processMemHighMB,
+		ProcessMemCriticalThresholdMB: processMemCriticalMB,
+		SampleInterval:                time.Second,
+		AdjustInterval:                5 * time.Second,
+		HistorySize:                   60,
+		SmoothingFactor:               0.3,
+		ScaleUpCooldown:               30 * time.Second,
+		ScaleDownCooldown:             10 * time.Second,
+		MinPullInterval:               3 * time.Second,
+		MaxPullInterval:               10 * time.Second,
+		IdleMultiplier:                2.0,
 	}
 }
 
@@ -161,8 +181,10 @@ type AdaptiveScheduler struct {
 	currentConcurrency int
 	currentTasks       int32 // 使用atomic操作
 
-	// 资源历史
+	// 资源历史（ring buffer）
 	metricsHistory []ResourceMetrics
+	metricsHead    int // ring buffer 写入位置
+	metricsCount   int // ring buffer 当前元素数量
 	smoothedCPU    float64
 	smoothedMem    float64
 
@@ -184,19 +206,24 @@ type AdaptiveScheduler struct {
 
 // SchedulerStats 调度器统计
 type SchedulerStats struct {
-	TotalTasksAccepted int64     // 接受的任务总数
-	TotalTasksRejected int64     // 拒绝的任务总数
-	TotalScaleUps      int64     // 扩容次数
-	TotalScaleDowns    int64     // 缩容次数
-	TotalThrottles     int64     // 限流次数
-	CurrentMode        string    // 当前模式
-	CurrentConcurrency int       // 当前并发数
-	AvgCPU             float64   // 平均CPU
-	AvgMem             float64   // 平均内存
-	LastAdjustTime     time.Time // 上次调整时间
-	LastThrottleTime   time.Time // 上次限流时间
-	ThrottledUntil     time.Time // 限流结束时间
-	PullInterval       int64     // 当前拉取间隔(ms)
+	TotalTasksAccepted   int64     // 接受的任务总数
+	TotalTasksRejected   int64     // 拒绝的任务总数
+	TotalScaleUps        int64     // 扩容次数
+	TotalScaleDowns      int64     // 缩容次数
+	TotalThrottles       int64     // 限流次数
+	CurrentMode          string    // 当前模式
+	CurrentConcurrency   int       // 当前并发数
+	CurrentTasks         int       // 当前运行任务数
+	AvailableSlots       int       // 当前剩余槽位数
+	AvgCPU               float64   // 平均CPU
+	AvgMem               float64   // 平均系统内存
+	ProcessMemMB         uint64    // Worker进程内存(MB)
+	ProcessMemHighMB     uint64    // Worker进程高阈值(MB)
+	ProcessMemCriticalMB uint64    // Worker进程危急阈值(MB)
+	LastAdjustTime       time.Time // 上次调整时间
+	LastThrottleTime     time.Time // 上次限流时间
+	ThrottledUntil       time.Time // 限流结束时间
+	PullInterval         int64     // 当前拉取间隔(ms)
 }
 
 // NewAdaptiveScheduler 创建自适应调度器
@@ -211,7 +238,7 @@ func NewAdaptiveScheduler(config *AdaptiveSchedulerConfig) *AdaptiveScheduler {
 		config:             config,
 		currentMode:        ModeNormal,
 		currentConcurrency: config.BaseConcurrency,
-		metricsHistory:     make([]ResourceMetrics, 0, config.HistorySize),
+		metricsHistory:     make([]ResourceMetrics, config.HistorySize),
 		ctx:                ctx,
 		cancel:             cancel,
 	}
@@ -272,10 +299,11 @@ func (s *AdaptiveScheduler) sampleMetrics() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 添加到历史
-	s.metricsHistory = append(s.metricsHistory, metrics)
-	if len(s.metricsHistory) > s.config.HistorySize {
-		s.metricsHistory = s.metricsHistory[1:]
+	// 添加到历史（ring buffer，O(1) 写入）
+	s.metricsHistory[s.metricsHead] = metrics
+	s.metricsHead = (s.metricsHead + 1) % s.config.HistorySize
+	if s.metricsCount < s.config.HistorySize {
+		s.metricsCount++
 	}
 
 	// 指数移动平均平滑
@@ -295,8 +323,8 @@ func (s *AdaptiveScheduler) collectMetrics() ResourceMetrics {
 		CPUCores:  runtime.NumCPU(),
 	}
 
-	// CPU使用率（采样100ms获取更准确的值）
-	if cpuPercent, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(cpuPercent) > 0 {
+	// CPU使用率（使用0避免阻塞，返回自上次调用以来的平均值）
+	if cpuPercent, err := cpu.Percent(0, false); err == nil && len(cpuPercent) > 0 {
 		metrics.CPUPercent = cpuPercent[0]
 	}
 
@@ -305,6 +333,16 @@ func (s *AdaptiveScheduler) collectMetrics() ResourceMetrics {
 		metrics.MemPercent = memInfo.UsedPercent
 		metrics.TotalMemoryMB = memInfo.Total / 1024 / 1024
 		metrics.AvailMemoryMB = memInfo.Available / 1024 / 1024
+	}
+
+	// Worker 进程内存占用
+	if proc, err := process.NewProcess(int32(os.Getpid())); err == nil {
+		if memInfo, err := proc.MemoryInfo(); err == nil {
+			metrics.ProcessMemMB = memInfo.RSS / 1024 / 1024
+		}
+		if percent, err := proc.MemoryPercent(); err == nil {
+			metrics.ProcessMemPercent = percent
+		}
 	}
 
 	// 负载（仅Linux/Unix，Windows上会返回错误）
@@ -385,8 +423,8 @@ func (s *AdaptiveScheduler) adjustConcurrency() {
 
 	// 记录变化
 	if oldMode != newMode || oldConcurrency != s.currentConcurrency {
-		s.log("INFO", "Scheduler adjusted: mode %s->%s, concurrency %d->%d (CPU:%.1f%%, Mem:%.1f%%)",
-			oldMode, newMode, oldConcurrency, s.currentConcurrency, s.smoothedCPU, s.smoothedMem)
+		s.log("INFO", "Scheduler adjusted: mode %s->%s, concurrency %d->%d (CPU:%.1f%%, SysMem:%.1f%%, ProcMem:%dMB)",
+			oldMode, newMode, oldConcurrency, s.currentConcurrency, s.smoothedCPU, s.smoothedMem, s.getLatestProcessMemMB())
 	}
 }
 
@@ -394,19 +432,20 @@ func (s *AdaptiveScheduler) adjustConcurrency() {
 func (s *AdaptiveScheduler) determineMode() ScheduleMode {
 	cpu := s.smoothedCPU
 	mem := s.smoothedMem
+	processMemMB := s.getLatestProcessMemMB()
 
-	// 危急模式：任一资源超过危急阈值
-	if cpu >= s.config.CPUCriticalThreshold || mem >= s.config.MemCriticalThreshold {
+	// 危急模式：CPU、系统内存或Worker进程内存任一超过危急阈值
+	if cpu >= s.config.CPUCriticalThreshold || mem >= s.config.MemCriticalThreshold || processMemMB >= s.config.ProcessMemCriticalThresholdMB {
 		return ModeCritical
 	}
 
-	// 保守模式：任一资源超过高阈值
-	if cpu >= s.config.CPUHighThreshold || mem >= s.config.MemHighThreshold {
+	// 保守模式：CPU、系统内存或Worker进程内存任一超过高阈值
+	if cpu >= s.config.CPUHighThreshold || mem >= s.config.MemHighThreshold || processMemMB >= s.config.ProcessMemHighThresholdMB {
 		return ModeConservative
 	}
 
-	// 激进模式：两个资源都低于低阈值
-	if cpu < s.config.CPULowThreshold && mem < s.config.MemLowThreshold {
+	// 激进模式：资源整体较低时才允许
+	if cpu < s.config.CPULowThreshold && mem < s.config.MemLowThreshold && processMemMB < s.config.ProcessMemLowThresholdMB {
 		return ModeAggressive
 	}
 
@@ -414,19 +453,36 @@ func (s *AdaptiveScheduler) determineMode() ScheduleMode {
 	return ModeNormal
 }
 
+func (s *AdaptiveScheduler) getLatestProcessMemMB() uint64 {
+	if s.metricsCount == 0 {
+		return 0
+	}
+	// ring buffer: 最新元素在 (head-1+size) % size
+	idx := (s.metricsHead - 1 + s.config.HistorySize) % s.config.HistorySize
+	return s.metricsHistory[idx].ProcessMemMB
+}
+
+func (s *AdaptiveScheduler) getLatestAvailMemoryMB() uint64 {
+	if s.metricsCount == 0 {
+		return 0
+	}
+	idx := (s.metricsHead - 1 + s.config.HistorySize) % s.config.HistorySize
+	return s.metricsHistory[idx].AvailMemoryMB
+}
+
 // calculateTargetConcurrency 计算目标并发数
 func (s *AdaptiveScheduler) calculateTargetConcurrency(mode ScheduleMode) int {
 	base := s.config.BaseConcurrency
 
 	switch mode {
-	case ModeAggressive:
-		return base // 100%
-	case ModeNormal:
-		return int(float64(base) * 0.75) // 75%
-	case ModeConservative:
-		return int(float64(base) * 0.5) // 50%
 	case ModeCritical:
 		return int(float64(base) * 0.25) // 25%
+	case ModeConservative:
+		return int(float64(base) * 0.5) // 50%
+	case ModeNormal:
+		return base // 正常模式保持用户配置的 task 并发上限
+	case ModeAggressive:
+		return base // 激进模式也不再扩容，避免 task 数进一步放大内存占用
 	default:
 		return base
 	}
@@ -473,18 +529,44 @@ func (s *AdaptiveScheduler) isResourceCritical() bool {
 	s.mu.RLock()
 	cpu := s.smoothedCPU
 	mem := s.smoothedMem
+	processMemMB := s.getLatestProcessMemMB()
 	s.mu.RUnlock()
 
-	return cpu >= s.config.CPUCriticalThreshold || mem >= s.config.MemCriticalThreshold
+	return cpu >= s.config.CPUCriticalThreshold || mem >= s.config.MemCriticalThreshold || processMemMB >= s.config.ProcessMemCriticalThresholdMB
 }
 
 // AcquireSlot 获取任务槽位
 func (s *AdaptiveScheduler) AcquireSlot() bool {
-	if !s.CanAcceptTask() {
+	s.mu.RLock()
+	mode := s.currentMode
+	maxConcurrency := s.currentConcurrency
+	s.mu.RUnlock()
+
+	if mode == ModeCritical && atomic.LoadInt32(&s.currentTasks) > 0 {
+		atomic.AddInt64(&s.stats.TotalTasksRejected, 1)
 		return false
 	}
-	atomic.AddInt32(&s.currentTasks, 1)
-	return true
+
+	if s.isResourceCritical() {
+		atomic.AddInt64(&s.stats.TotalTasksRejected, 1)
+		atomic.AddInt64(&s.stats.TotalThrottles, 1)
+		s.mu.Lock()
+		s.stats.LastThrottleTime = time.Now()
+		s.mu.Unlock()
+		return false
+	}
+
+	for {
+		current := atomic.LoadInt32(&s.currentTasks)
+		if int(current) >= maxConcurrency {
+			atomic.AddInt64(&s.stats.TotalTasksRejected, 1)
+			return false
+		}
+		if atomic.CompareAndSwapInt32(&s.currentTasks, current, current+1) {
+			atomic.AddInt64(&s.stats.TotalTasksAccepted, 1)
+			return true
+		}
+	}
 }
 
 // ReleaseSlot 释放任务槽位
@@ -632,6 +714,14 @@ func (s *AdaptiveScheduler) GetStats() SchedulerStats {
 	stats := s.stats
 	stats.CurrentConcurrency = s.currentConcurrency
 	stats.CurrentMode = s.currentMode.String()
+	stats.CurrentTasks = int(atomic.LoadInt32(&s.currentTasks))
+	stats.AvailableSlots = s.currentConcurrency - stats.CurrentTasks
+	if stats.AvailableSlots < 0 {
+		stats.AvailableSlots = 0
+	}
+	stats.ProcessMemMB = s.getLatestProcessMemMB()
+	stats.ProcessMemHighMB = s.config.ProcessMemHighThresholdMB
+	stats.ProcessMemCriticalMB = s.config.ProcessMemCriticalThresholdMB
 	return stats
 }
 

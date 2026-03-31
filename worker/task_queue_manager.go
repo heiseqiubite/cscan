@@ -32,24 +32,24 @@ type TaskQueueItem struct {
 // 实现优先级队列，防止任务堆积导致内存溢出
 type TaskQueueManager struct {
 	mu sync.RWMutex
-	
+
 	// 队列配置
-	maxQueueSize    int           // 最大队列长度
-	maxWaitTime     time.Duration // 任务最大等待时间
-	
+	maxQueueSize int           // 最大队列长度
+	maxWaitTime  time.Duration // 任务最大等待时间
+
 	// 优先级队列
 	queues map[TaskPriority][]*TaskQueueItem
-	
+
 	// 统计信息
-	totalEnqueued   int64 // 总入队数
-	totalDequeued   int64 // 总出队数
-	totalDropped    int64 // 总丢弃数
-	totalExpired    int64 // 总过期数
-	currentSize     int32 // 当前队列大小
-	
+	totalEnqueued int64 // 总入队数
+	totalDequeued int64 // 总出队数
+	totalDropped  int64 // 总丢弃数
+	totalExpired  int64 // 总过期数
+	currentSize   int32 // 当前队列大小
+
 	// 控制
 	stopChan chan struct{}
-	
+
 	// 日志回调
 	logger func(level, format string, args ...interface{})
 }
@@ -62,7 +62,7 @@ func NewTaskQueueManager(maxQueueSize int, maxWaitTime time.Duration) *TaskQueue
 	if maxWaitTime <= 0 {
 		maxWaitTime = 5 * time.Minute // 默认最大等待5分钟
 	}
-	
+
 	return &TaskQueueManager{
 		maxQueueSize: maxQueueSize,
 		maxWaitTime:  maxWaitTime,
@@ -101,7 +101,7 @@ func (m *TaskQueueManager) Stop() {
 func (m *TaskQueueManager) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second) // 每30秒清理一次
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -118,10 +118,10 @@ func (m *TaskQueueManager) cleanupLoop(ctx context.Context) {
 func (m *TaskQueueManager) cleanupExpiredTasks() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	now := time.Now()
 	expiredCount := 0
-	
+
 	for priority, queue := range m.queues {
 		newQueue := make([]*TaskQueueItem, 0, len(queue))
 		for _, item := range queue {
@@ -134,7 +134,7 @@ func (m *TaskQueueManager) cleanupExpiredTasks() {
 		}
 		m.queues[priority] = newQueue
 	}
-	
+
 	if expiredCount > 0 {
 		atomic.AddInt32(&m.currentSize, int32(-expiredCount))
 		m.log("INFO", "Cleaned up %d expired tasks from queue", expiredCount)
@@ -145,7 +145,7 @@ func (m *TaskQueueManager) cleanupExpiredTasks() {
 func (m *TaskQueueManager) Enqueue(task *scheduler.TaskInfo, priority TaskPriority) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// 检查队列是否已满
 	currentSize := int(atomic.LoadInt32(&m.currentSize))
 	if currentSize >= m.maxQueueSize {
@@ -156,20 +156,20 @@ func (m *TaskQueueManager) Enqueue(task *scheduler.TaskInfo, priority TaskPriori
 			return false
 		}
 	}
-	
+
 	// 创建队列项
 	item := &TaskQueueItem{
 		Task:     task,
 		Priority: priority,
 		AddTime:  time.Now(),
 	}
-	
+
 	// 添加到对应优先级队列
 	m.queues[priority] = append(m.queues[priority], item)
-	
+
 	atomic.AddInt32(&m.currentSize, 1)
 	atomic.AddInt64(&m.totalEnqueued, 1)
-	
+
 	return true
 }
 
@@ -177,24 +177,24 @@ func (m *TaskQueueManager) Enqueue(task *scheduler.TaskInfo, priority TaskPriori
 func (m *TaskQueueManager) Dequeue() *scheduler.TaskInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// 按优先级顺序检查队列
 	priorities := []TaskPriority{PriorityUrgent, PriorityHigh, PriorityNormal, PriorityLow}
-	
+
 	for _, priority := range priorities {
 		queue := m.queues[priority]
 		if len(queue) > 0 {
 			// 取出第一个任务
 			item := queue[0]
 			m.queues[priority] = queue[1:]
-			
+
 			atomic.AddInt32(&m.currentSize, -1)
 			atomic.AddInt64(&m.totalDequeued, 1)
-			
+
 			return item.Task
 		}
 	}
-	
+
 	return nil // 队列为空
 }
 
@@ -202,7 +202,7 @@ func (m *TaskQueueManager) Dequeue() *scheduler.TaskInfo {
 func (m *TaskQueueManager) dropLowPriorityTaskLocked() bool {
 	// 按优先级从低到高尝试丢弃任务
 	priorities := []TaskPriority{PriorityLow, PriorityNormal, PriorityHigh}
-	
+
 	for _, priority := range priorities {
 		queue := m.queues[priority]
 		if len(queue) > 0 {
@@ -214,7 +214,7 @@ func (m *TaskQueueManager) dropLowPriorityTaskLocked() bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -237,7 +237,7 @@ func (m *TaskQueueManager) IsEmpty() bool {
 func (m *TaskQueueManager) GetStats() TaskQueueStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	queueSizes := make(map[string]int)
 	for priority, queue := range m.queues {
 		var priorityName string
@@ -253,40 +253,40 @@ func (m *TaskQueueManager) GetStats() TaskQueueStats {
 		}
 		queueSizes[priorityName] = len(queue)
 	}
-	
+
 	return TaskQueueStats{
-		MaxQueueSize:    m.maxQueueSize,
-		CurrentSize:     int(atomic.LoadInt32(&m.currentSize)),
-		TotalEnqueued:   atomic.LoadInt64(&m.totalEnqueued),
-		TotalDequeued:   atomic.LoadInt64(&m.totalDequeued),
-		TotalDropped:    atomic.LoadInt64(&m.totalDropped),
-		TotalExpired:    atomic.LoadInt64(&m.totalExpired),
-		QueueSizes:      queueSizes,
-		MaxWaitTime:     m.maxWaitTime,
+		MaxQueueSize:  m.maxQueueSize,
+		CurrentSize:   int(atomic.LoadInt32(&m.currentSize)),
+		TotalEnqueued: atomic.LoadInt64(&m.totalEnqueued),
+		TotalDequeued: atomic.LoadInt64(&m.totalDequeued),
+		TotalDropped:  atomic.LoadInt64(&m.totalDropped),
+		TotalExpired:  atomic.LoadInt64(&m.totalExpired),
+		QueueSizes:    queueSizes,
+		MaxWaitTime:   m.maxWaitTime,
 	}
 }
 
 // TaskQueueStats 任务队列统计
 type TaskQueueStats struct {
-	MaxQueueSize    int                `json:"maxQueueSize"`
-	CurrentSize     int                `json:"currentSize"`
-	TotalEnqueued   int64              `json:"totalEnqueued"`
-	TotalDequeued   int64              `json:"totalDequeued"`
-	TotalDropped    int64              `json:"totalDropped"`
-	TotalExpired    int64              `json:"totalExpired"`
-	QueueSizes      map[string]int     `json:"queueSizes"`
-	MaxWaitTime     time.Duration      `json:"maxWaitTime"`
+	MaxQueueSize  int            `json:"maxQueueSize"`
+	CurrentSize   int            `json:"currentSize"`
+	TotalEnqueued int64          `json:"totalEnqueued"`
+	TotalDequeued int64          `json:"totalDequeued"`
+	TotalDropped  int64          `json:"totalDropped"`
+	TotalExpired  int64          `json:"totalExpired"`
+	QueueSizes    map[string]int `json:"queueSizes"`
+	MaxWaitTime   time.Duration  `json:"maxWaitTime"`
 }
 
 // Clear 清空队列
 func (m *TaskQueueManager) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	for priority := range m.queues {
 		m.queues[priority] = make([]*TaskQueueItem, 0)
 	}
-	
+
 	atomic.StoreInt32(&m.currentSize, 0)
 	m.log("INFO", "Task queue cleared")
 }
@@ -298,19 +298,19 @@ func GetTaskPriority(task *scheduler.TaskInfo) TaskPriority {
 	if err := json.Unmarshal([]byte(task.Config), &taskConfig); err != nil {
 		return PriorityNormal
 	}
-	
+
 	// 检查任务类型
 	taskType, _ := taskConfig["taskType"].(string)
 	switch taskType {
 	case "poc_validate", "poc_batch_validate":
 		return PriorityHigh // POC验证任务优先级较高
 	}
-	
+
 	// 检查是否是紧急任务
 	if urgent, ok := taskConfig["urgent"].(bool); ok && urgent {
 		return PriorityUrgent
 	}
-	
+
 	// 检查优先级配置
 	if priority, ok := taskConfig["priority"].(string); ok {
 		switch priority {
@@ -322,7 +322,7 @@ func GetTaskPriority(task *scheduler.TaskInfo) TaskPriority {
 			return PriorityLow
 		}
 	}
-	
+
 	// 根据目标数量确定优先级
 	if target, ok := taskConfig["target"].(string); ok {
 		targetCount := len(strings.Split(strings.TrimSpace(target), "\n"))
@@ -332,6 +332,6 @@ func GetTaskPriority(task *scheduler.TaskInfo) TaskPriority {
 			return PriorityLow // 大批量任务优先级较低
 		}
 	}
-	
+
 	return PriorityNormal
 }

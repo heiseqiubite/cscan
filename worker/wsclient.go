@@ -407,7 +407,6 @@ func (c *WorkerWSClient) Close() {
 	c.wg.Wait()
 }
 
-
 // ==================== Message Pumps ====================
 
 // readPump 读取消息循环
@@ -473,7 +472,7 @@ func (c *WorkerWSClient) handleReadError(ctx context.Context, err error) bool {
 	}
 
 	logx.Infof("[WSClient] Read error: %v", err)
-	
+
 	// 关闭旧连�?
 	c.connMu.Lock()
 	if c.conn != nil {
@@ -481,7 +480,7 @@ func (c *WorkerWSClient) handleReadError(ctx context.Context, err error) bool {
 		c.conn = nil
 	}
 	c.connMu.Unlock()
-	
+
 	c.connected.Store(false)
 	c.authenticated.Store(false)
 
@@ -503,13 +502,13 @@ func (c *WorkerWSClient) handleReadError(ctx context.Context, err error) bool {
 
 	// 使用独立�?context 进行重连，避免继承已取消的父 context
 	reconnectCtx, reconnectCancel := context.WithCancel(context.Background())
-	
+
 	go func() {
 		defer func() {
 			reconnectCancel()
 			c.reconnecting.Store(false)
 		}()
-		
+
 		// 监听关闭信号
 		go func() {
 			select {
@@ -518,14 +517,14 @@ func (c *WorkerWSClient) handleReadError(ctx context.Context, err error) bool {
 			case <-reconnectCtx.Done():
 			}
 		}()
-		
+
 		// 等待一小段时间再重连，避免立即重连
 		select {
 		case <-reconnectCtx.Done():
 			return
 		case <-time.After(time.Second):
 		}
-		
+
 		if err := c.connectWithRetry(reconnectCtx, true); err != nil {
 			logx.Infof("[WSClient] Reconnect failed: %v", err)
 		}
@@ -605,7 +604,7 @@ func (c *WorkerWSClient) pingPump(ctx context.Context) {
 
 			if time.Since(lastPong) > heartbeatTimeout {
 				logx.Infof("[WSClient] Heartbeat timeout (no PONG for %v), triggering reconnect...", time.Since(lastPong))
-				
+
 				// 关闭当前连接并触发重�?
 				c.connMu.Lock()
 				if c.conn != nil {
@@ -613,19 +612,19 @@ func (c *WorkerWSClient) pingPump(ctx context.Context) {
 					c.conn = nil
 				}
 				c.connMu.Unlock()
-				
+
 				c.connected.Store(false)
 				c.authenticated.Store(false)
-				
+
 				// 触发重连（如果没有正在进行的重连�?
 				if c.reconnecting.CompareAndSwap(false, true) {
 					go func() {
 						defer c.reconnecting.Store(false)
-						
+
 						// 使用独立�?context 进行重连
 						reconnectCtx, reconnectCancel := context.WithCancel(context.Background())
 						defer reconnectCancel()
-						
+
 						// 监听关闭信号
 						go func() {
 							select {
@@ -634,7 +633,7 @@ func (c *WorkerWSClient) pingPump(ctx context.Context) {
 							case <-reconnectCtx.Done():
 							}
 						}()
-						
+
 						time.Sleep(time.Second)
 						if err := c.connectWithRetry(reconnectCtx, true); err != nil {
 							logx.Infof("[WSClient] Reconnect from pingPump failed: %v", err)
@@ -763,7 +762,7 @@ func (c *WorkerWSClient) handleControl(payload json.RawMessage) {
 	}
 	if err := json.Unmarshal(payload, &workerControl); err == nil {
 		logx.Infof("[WSClient] Parsed control action: '%s'", workerControl.Action)
-		
+
 		// 检查是否是 Worker 级别控制命令
 		isWorkerControl := false
 		switch workerControl.Action {
@@ -796,7 +795,7 @@ func (c *WorkerWSClient) handleControl(payload json.RawMessage) {
 			}
 			isWorkerControl = true
 		}
-		
+
 		if isWorkerControl {
 			return
 		}
@@ -988,7 +987,6 @@ func (c *WorkerWSClient) WaitForConnection(timeout time.Duration) bool {
 	return false
 }
 
-
 // ==================== File Operation Handlers ====================
 
 // handleFileListRequest 处理文件列表请求
@@ -1172,7 +1170,6 @@ func (c *WorkerWSClient) handleFileMkdirRequest(payload json.RawMessage) {
 		Payload: payloadData,
 	})
 }
-
 
 // ==================== Terminal Operation Handlers ====================
 
@@ -1365,4 +1362,3 @@ func (c *WorkerWSClient) SendTerminalOutput(sessionId string, data []byte) error
 		Payload: payloadData,
 	})
 }
-

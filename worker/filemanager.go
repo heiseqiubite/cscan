@@ -94,7 +94,6 @@ func (m *FileManager) GetMaxUploadSize() int64 {
 	return m.config.MaxUploadSize
 }
 
-
 // IsPathAllowed 检查路径是否在允许的目录范围内（安全沙箱）
 func (m *FileManager) IsPathAllowed(path string) bool {
 	m.mu.RLock()
@@ -241,7 +240,6 @@ func fileInfoFromOS(info os.FileInfo) FileInfo {
 		IsDir:   info.IsDir(),
 	}
 }
-
 
 // ReadFile 读取文件内容
 func (m *FileManager) ReadFile(path string) ([]byte, error) {
@@ -580,7 +578,6 @@ func (m *FileManager) GetSystemRoot() string {
 	}
 	return "/"
 }
-
 
 // ==================== Error Types ====================
 

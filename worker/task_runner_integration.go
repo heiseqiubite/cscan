@@ -467,6 +467,7 @@ func (e *FingerprintExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 		generatedAssets := scanner.GenerateAssetsFromTargets(ctx.Target)
 		if len(generatedAssets) > 0 {
 			assets = generatedAssets
+			ctx.Assets = generatedAssets
 			w.taskLog(task.TaskId, LevelInfo, "Fingerprint: generated %d assets from user input targets", len(assets))
 		}
 	}
@@ -525,6 +526,8 @@ func (e *FingerprintExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 		Options:    config,
 		TaskLogger: fpTaskLogger,
 	})
+
+	ctx.Assets = assets
 
 	// 检查是否超时
 	if fpCtx.Err() == context.DeadlineExceeded {
@@ -606,9 +609,12 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 		generatedAssets := scanner.GenerateAssetsFromTargets(ctx.Target)
 		if len(generatedAssets) > 0 {
 			assets = generatedAssets
+			ctx.Assets = generatedAssets
 			w.taskLog(task.TaskId, LevelInfo, "POC scan: generated %d assets from user input targets", len(assets))
 		}
 	}
+
+	assets = ctx.Assets
 
 	if len(assets) == 0 {
 		w.taskLog(task.TaskId, LevelInfo, "POC scan: skipped (no assets)")
@@ -753,10 +759,12 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 	}
 
 	result, err := s.Scan(pocCtx, &scanner.ScanConfig{
-		Assets:     ctx.Assets,
+		Assets:     assets,
 		Options:    nucleiOpts,
 		TaskLogger: pocTaskLogger,
 	})
+
+	ctx.Assets = assets
 
 	// 刷新剩余漏洞
 	vulBuffer.Flush(ctx.Ctx, func(vuls []*scanner.Vulnerability) {
@@ -866,9 +874,12 @@ func (e *DirScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 		generatedAssets := scanner.GenerateAssetsFromTargets(ctx.Target)
 		if len(generatedAssets) > 0 {
 			assets = generatedAssets
+			ctx.Assets = generatedAssets
 			w.taskLog(task.TaskId, LevelInfo, "Dir scan: generated %d assets from user input targets", len(assets))
 		}
 	}
+
+	assets = ctx.Assets
 
 	if len(assets) == 0 {
 		w.taskLog(task.TaskId, LevelInfo, "Dir scan: skipped (no assets)")

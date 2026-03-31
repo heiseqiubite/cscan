@@ -66,7 +66,6 @@ type TaskUpdateResp struct {
 	Success bool   `json:"success"`
 }
 
-
 // IPV4Info IPv4信息
 type IPV4Info struct {
 	IP       string `json:"ip"`
@@ -166,7 +165,6 @@ type VulResultResp struct {
 	Total   int32  `json:"total"`
 }
 
-
 // HeartbeatReq 心跳请求
 type HeartbeatReq struct {
 	WorkerName         string  `json:"workerName"`
@@ -263,7 +261,6 @@ type FingerprintsResp struct {
 	Count        int32                 `json:"count"`
 }
 
-
 // SubfinderReq Subfinder配置获取请求
 type SubfinderReq struct {
 	WorkspaceId string `json:"workspaceId"`
@@ -351,7 +348,6 @@ type PocByIdResp struct {
 	Severity string `json:"severity"`
 	PocType  string `json:"pocType"`
 }
-
 
 // ==================== HTTP Client Methods ====================
 
@@ -584,7 +580,6 @@ func (c *WorkerHTTPClient) SaveVulResult(ctx context.Context, req *VulResultReq)
 	return &resp, nil
 }
 
-
 // Heartbeat 心跳
 func (c *WorkerHTTPClient) Heartbeat(ctx context.Context, req *HeartbeatReq) (*HeartbeatResp, error) {
 	respBody, err := c.doRequest(ctx, http.MethodPost, "/api/v1/worker/heartbeat", req)
@@ -810,8 +805,8 @@ type ActiveFingerprintsReq struct {
 // ActiveFingerprintDocument 主动指纹文档
 type ActiveFingerprintDocument struct {
 	Id          string   `json:"id"`
-	Name        string   `json:"name"`        // 应用名称（用于关联被动指纹）
-	Paths       []string `json:"paths"`       // 主动探测路径列表
+	Name        string   `json:"name"`  // 应用名称（用于关联被动指纹）
+	Paths       []string `json:"paths"` // 主动探测路径列表
 	Description string   `json:"description"`
 	Enabled     bool     `json:"enabled"`
 	// 关联的被动指纹规则（用于匹配响应）
@@ -1003,7 +998,6 @@ func (c *WorkerHTTPClient) GetBlacklistRules(ctx context.Context) (*BlacklistRul
 
 	return &resp, nil
 }
-
 
 // ==================== Task Recovery ====================
 

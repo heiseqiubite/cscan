@@ -15,34 +15,34 @@ import (
 
 // WorkerInfoPayload Worker详细信息
 type WorkerInfoPayload struct {
-	Name        string          `json:"name"`
-	IP          string          `json:"ip"`
-	OS          string          `json:"os"`
-	Arch        string          `json:"arch"`
-	Version     string          `json:"version"`
-	Hostname    string          `json:"hostname"`
-	Uptime      int64           `json:"uptime"`      // Worker运行时长（秒）
-	SystemUptime int64          `json:"systemUptime"` // 系统运行时长（秒）
-	CpuCores    int             `json:"cpuCores"`
-	CpuLoad     float64         `json:"cpuLoad"`
-	MemTotal    uint64          `json:"memTotal"`
-	MemUsed     uint64          `json:"memUsed"`
-	MemPercent  float64         `json:"memPercent"`
-	DiskTotal   uint64          `json:"diskTotal"`
-	DiskUsed    uint64          `json:"diskUsed"`
-	DiskPercent float64         `json:"diskPercent"`
-	Concurrency int             `json:"concurrency"` // 并发数
-	TaskStarted int             `json:"taskStarted"`
-	TaskRunning int             `json:"taskRunning"`
-	Tools       map[string]bool `json:"tools"`
+	Name         string          `json:"name"`
+	IP           string          `json:"ip"`
+	OS           string          `json:"os"`
+	Arch         string          `json:"arch"`
+	Version      string          `json:"version"`
+	Hostname     string          `json:"hostname"`
+	Uptime       int64           `json:"uptime"`       // Worker运行时长（秒）
+	SystemUptime int64           `json:"systemUptime"` // 系统运行时长（秒）
+	CpuCores     int             `json:"cpuCores"`
+	CpuLoad      float64         `json:"cpuLoad"`
+	MemTotal     uint64          `json:"memTotal"`
+	MemUsed      uint64          `json:"memUsed"`
+	MemPercent   float64         `json:"memPercent"`
+	DiskTotal    uint64          `json:"diskTotal"`
+	DiskUsed     uint64          `json:"diskUsed"`
+	DiskPercent  float64         `json:"diskPercent"`
+	Concurrency  int             `json:"concurrency"` // 并发数
+	TaskStarted  int             `json:"taskStarted"`
+	TaskRunning  int             `json:"taskRunning"`
+	Tools        map[string]bool `json:"tools"`
 }
 
 // SysInfoCollector 系统信息收集器
 type SysInfoCollector struct {
-	workerName  string
-	workerIP    string
-	version     string
-	startTime   time.Time
+	workerName string
+	workerIP   string
+	version    string
+	startTime  time.Time
 }
 
 // NewSysInfoCollector 创建系统信息收集器

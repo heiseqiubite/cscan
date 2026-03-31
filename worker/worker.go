@@ -830,6 +830,29 @@ func (w *Worker) SubmitTask(task *scheduler.TaskInfo) {
 
 // checkTaskControl 检查任务控制信号
 // 返回: "PAUSE" - 暂停, "STOP" - 停止, "" - 继续执行
+
+// handleTaskControl 统一处理任务控制信号(STOP/PAUSE)
+// 返回 true 表示任务被中止或暂停，调用方应直接 return
+func (w *Worker) handleTaskControl(ctx context.Context, task *scheduler.TaskInfo, completedPhases map[string]bool, assets []*scanner.Asset, phaseName string) bool {
+	if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
+		if phaseName != "" {
+			w.taskLog(task.TaskId, LevelInfo, "Task stopped during %s", phaseName)
+		} else {
+			w.taskLog(task.TaskId, LevelInfo, "Task stopped")
+		}
+		return true
+	} else if ctrl == "PAUSE" {
+		if phaseName != "" {
+			w.taskLog(task.TaskId, LevelInfo, "Task paused during %s, saving progress...", phaseName)
+		} else {
+			w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
+		}
+		w.saveTaskProgress(ctx, task, completedPhases, assets)
+		return true
+	}
+	return false
+}
+
 func (w *Worker) checkTaskControl(ctx context.Context, taskId string) string {
 	// 从控制信号映射中检查
 	if signal, ok := w.taskControlSignals.Load(taskId); ok {
@@ -1413,17 +1436,10 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			}
 		}
 
-		// 检查是否被暂停或取消
-		if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-			w.taskLog(task.TaskId, LevelInfo, "Task stopped during domain scan")
-			return
-		} else if ctrl == "PAUSE" {
-			w.taskLog(task.TaskId, LevelInfo, "Task paused during domain scan, saving progress...")
-			// 保存已发现的子域名资产
-			if len(mergedAssets) > 0 {
-				allAssets = append(allAssets, mergedAssets...)
-			}
-			w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+		if len(mergedAssets) > 0 {
+			allAssets = append(allAssets, mergedAssets...)
+		}
+		if w.handleTaskControl(ctx, task, completedPhases, allAssets, "domain scan") {
 			return
 		}
 
@@ -1468,12 +1484,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 	// 执行端口扫描（只有明确启用时才执行）
 	if config.PortScan != nil && config.PortScan.Enable && !completedPhases["portscan"] {
 		// 检查控制信号
-		if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-			w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-			return
-		} else if ctrl == "PAUSE" {
-			w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-			w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+		if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 			return
 		}
 
@@ -1593,12 +1604,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 	}
 
 	// 检查控制信号
-	if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-		w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-		return
-	} else if ctrl == "PAUSE" {
-		w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-		w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+	if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 		return
 	}
 
@@ -1620,12 +1626,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			w.incrSubTaskDone(ctx, task, "端口识别")
 		} else {
 			// 检查控制信号
-			if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-				w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-				return
-			} else if ctrl == "PAUSE" {
-				w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-				w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+			if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 				return
 			}
 
@@ -1645,12 +1646,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 	}
 
 	// 检查控制信号
-	if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-		w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-		return
-	} else if ctrl == "PAUSE" {
-		w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-		w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+	if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 		return
 	}
 
@@ -1808,12 +1804,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 	}
 
 	// 检查控制信号
-	if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-		w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-		return
-	} else if ctrl == "PAUSE" {
-		w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-		w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+	if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 		return
 	}
 
@@ -1835,12 +1826,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			w.incrSubTaskDone(ctx, task, "目录扫描")
 		} else {
 			// 检查控制信号
-			if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-				w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-				return
-			} else if ctrl == "PAUSE" {
-				w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-				w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+			if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 				return
 			}
 
@@ -1861,12 +1847,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 	}
 
 	// 检查控制信号
-	if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
-		w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-		return
-	} else if ctrl == "PAUSE" {
-		w.taskLog(task.TaskId, LevelInfo, "Task paused, saving progress...")
-		w.saveTaskProgress(ctx, task, completedPhases, allAssets)
+	if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 		return
 	}
 
@@ -2280,59 +2261,7 @@ func (w *Worker) saveVulResult(ctx context.Context, workspaceId, mainTaskId stri
 		w.taskLog(mainTaskId, LevelDebug, "[SaveVul] PocFile=%s, CurlCommand len=%d, Request len=%d, Response len=%d",
 			vul.PocFile, len(vul.CurlCommand), len(vul.Request), len(vul.Response))
 
-		httpVul := VulDocument{
-			Authority: vul.Authority,
-			Host:      vul.Host,
-			Port:      int32(vul.Port),
-			Url:       vul.Url,
-			PocFile:   vul.PocFile,
-			Source:    vul.Source,
-			Severity:  vul.Severity,
-			Result:    vul.Result,
-			TaskId:    mainTaskId, // 设置任务ID用于报告查询
-		}
-
-		// 漏洞知识库关联字段
-		if vul.CvssScore > 0 {
-			httpVul.CvssScore = &vul.CvssScore
-		}
-		if vul.CveId != "" {
-			httpVul.CveId = &vul.CveId
-		}
-		if vul.CweId != "" {
-			httpVul.CweId = &vul.CweId
-		}
-		if vul.Remediation != "" {
-			httpVul.Remediation = &vul.Remediation
-		}
-		if len(vul.References) > 0 {
-			httpVul.References = vul.References
-		}
-
-		// 证据链字段
-		if vul.MatcherName != "" {
-			matcherName := vul.MatcherName
-			httpVul.MatcherName = &matcherName
-		}
-		if len(vul.ExtractedResults) > 0 {
-			httpVul.ExtractedResults = vul.ExtractedResults
-		}
-		if vul.CurlCommand != "" {
-			curlCommand := vul.CurlCommand
-			httpVul.CurlCommand = &curlCommand
-		}
-		if vul.Request != "" {
-			request := vul.Request
-			httpVul.Request = &request
-		}
-		if vul.Response != "" {
-			response := vul.Response
-			httpVul.Response = &response
-		}
-		if vul.ResponseTruncated {
-			responseTruncated := vul.ResponseTruncated
-			httpVul.ResponseTruncated = &responseTruncated
-		}
+		httpVul := ToVulDocument(vul, mainTaskId)
 
 		// 输出httpVul中的证据字段
 		w.taskLog(mainTaskId, LevelDebug, "[SaveVul] httpVul.CurlCommand=%v, httpVul.Request=%v, httpVul.Response=%v",
