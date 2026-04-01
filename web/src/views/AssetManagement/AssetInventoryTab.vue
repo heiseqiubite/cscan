@@ -6,80 +6,80 @@
       class="asset-left-tabs"
     >
       <!-- 综合资产 (Comprehensive Assets - The Card View) -->
-      <el-tab-pane name="comprehensive" lazy>
+      <el-tab-pane name="comprehensive">
         <template #label>
           <span class="left-tab-label">
             <el-icon><Menu /></el-icon>
             {{ $t('asset.comprehensive') || '综合资产' }}
           </span>
         </template>
-        <AssetInventoryCardView />
+        <AssetInventoryCardView v-if="activeLeftTab === 'comprehensive'" />
       </el-tab-pane>
 
       <!-- 端口 (Ports) -->
-      <el-tab-pane name="port" lazy>
+      <el-tab-pane name="port">
         <template #label>
           <span class="left-tab-label">
             <el-icon><List /></el-icon>
             {{ $t('asset.port') || '端口' }}
           </span>
         </template>
-        <AssetAllView />
+        <AssetAllView v-if="activeLeftTab === 'port'" />
       </el-tab-pane>
 
       <!-- 域名 (Domains) -->
-      <el-tab-pane name="domain" lazy>
+      <el-tab-pane name="domain">
         <template #label>
           <span class="left-tab-label">
             <el-icon><Position /></el-icon>
             {{ $t('asset.domains') || '域名' }}
           </span>
         </template>
-        <DomainView />
+        <DomainView v-if="activeLeftTab === 'domain'" />
       </el-tab-pane>
 
       <!-- IP -->
-      <el-tab-pane name="ip" lazy>
+      <el-tab-pane name="ip">
         <template #label>
           <span class="left-tab-label">
             <el-icon><Connection /></el-icon>
             {{ $t('asset.ips') || 'IP' }}
           </span>
         </template>
-        <IPView />
+        <IPView v-if="activeLeftTab === 'ip'" />
       </el-tab-pane>
 
       <!-- 站点 (Sites) -->
-      <el-tab-pane name="site" lazy>
+      <el-tab-pane name="site">
         <template #label>
           <span class="left-tab-label">
             <el-icon><Monitor /></el-icon>
             {{ $t('asset.sites') || '站点' }}
           </span>
         </template>
-        <SiteView />
+        <SiteView v-if="activeLeftTab === 'site'" />
       </el-tab-pane>
 
       <!-- 目录扫描 (Directory Scans) -->
-      <el-tab-pane name="dirscan" lazy>
+      <el-tab-pane name="dirscan">
         <template #label>
           <span class="left-tab-label">
             <el-icon><Folder /></el-icon>
             {{ $t('asset.dirManagement') || '目录扫描' }}
           </span>
         </template>
-        <DirScanView />
+        <DirScanView v-if="activeLeftTab === 'dirscan'" />
       </el-tab-pane>
 
       <!-- 漏洞风险 (Vuls) -->
-      <el-tab-pane name="vul" lazy>
+      <el-tab-pane name="vul">
         <template #label>
           <span class="left-tab-label">
             <el-icon><Warning /></el-icon>
             {{ $t('asset.vulnerability') || '漏洞风险' }}
           </span>
         </template>
-        <VulView />
+        <VulView v-if="activeLeftTab === 'vul'" />
       </el-tab-pane>
     </el-tabs>
   </div>

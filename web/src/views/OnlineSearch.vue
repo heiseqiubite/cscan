@@ -59,6 +59,7 @@
 
       <el-table :data="tableData" v-loading="loading" stripe max-height="500">
         <el-table-column type="selection" width="50" />
+        <el-table-column prop="host" :label="$t('onlineSearch.host')" min-width="250" show-overflow-tooltip />
         <el-table-column prop="ip" :label="$t('onlineSearch.ip')" width="140" />
         <el-table-column prop="port" :label="$t('onlineSearch.port')" width="80" />
         <el-table-column prop="protocol" :label="$t('onlineSearch.protocol')" width="80" />
@@ -227,7 +228,15 @@ async function handleImportAll() {
     })
 
     if (res.code === 0) {
-      ElMessage.success(res.msg || t('onlineSearch.importSuccess'))
+      // 利用结构化字段构造清晰的提示消息
+      const fetched = res.totalFetched || 0
+      const imported = res.totalImport || 0
+      const duplicates = fetched - imported
+      let msg = t('onlineSearch.importSuccess') + `：${imported} ` + t('onlineSearch.items')
+      if (duplicates > 0) {
+        msg += t('onlineSearch.importDedupInfo', { fetched, duplicates })
+      }
+      ElMessage.success(msg)
     } else {
       ElMessage.error(res.msg || t('onlineSearch.importFailed'))
     }

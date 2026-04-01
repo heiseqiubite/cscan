@@ -11,7 +11,7 @@
       :statLabels="statLabels"
       selection
       :searchPlaceholder="$t('vul.targetPlaceholder')"
-      :searchKeys="['authority', 'url', 'pocFile']"
+      :searchKeys="['authority', 'url', 'pocFile', 'vulName']"
       @data-changed="$emit('data-changed')"
     >
       <!-- 自定义导出（5种命令） -->
@@ -41,6 +41,14 @@
         <el-tag :type="getSeverityType(row.severity)" size="small">{{ getSeverityLabel(row.severity) }}</el-tag>
       </template>
 
+      <!-- POC标签 -->
+      <template #tags="{ row }">
+        <template v-if="row.tags && row.tags.length">
+          <el-tag v-for="tag in row.tags.slice(0, 3)" :key="tag" size="small" class="tag-item">{{ tag }}</el-tag>
+          <el-tag v-if="row.tags.length > 3" size="small" type="info">+{{ row.tags.length - 3 }}</el-tag>
+        </template>
+      </template>
+
       <!-- 操作 -->
       <template #operation="{ row }">
         <el-button type="primary" link size="small" @click="showDetail(row)">{{ $t('common.detail') }}</el-button>
@@ -51,12 +59,16 @@
     <!-- 详情侧边栏 -->
     <el-drawer v-model="detailVisible" :title="$t('vul.vulDetail')" size="50%" direction="rtl">
       <el-descriptions :column="2" border>
-        <el-descriptions-item :label="$t('vul.target')">{{ currentVul.authority }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('vul.vulName')" :span="2">{{ currentVul.vulName }}</el-descriptions-item>
         <el-descriptions-item :label="$t('vul.severity')">
           <el-tag :type="getSeverityType(currentVul.severity)">{{ getSeverityLabel(currentVul.severity) }}</el-tag>
         </el-descriptions-item>
+        <el-descriptions-item :label="$t('vul.target')">{{ currentVul.authority }}</el-descriptions-item>
         <el-descriptions-item label="URL" :span="2">{{ currentVul.url }}</el-descriptions-item>
         <el-descriptions-item :label="$t('vul.pocFile')" :span="2">{{ currentVul.pocFile }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('vul.tags')" :span="2" v-if="currentVul.tags && currentVul.tags.length">
+          <el-tag v-for="tag in currentVul.tags" :key="tag" size="small" class="tag-item">{{ tag }}</el-tag>
+        </el-descriptions-item>
         <el-descriptions-item :label="$t('vul.source')">{{ currentVul.source }}</el-descriptions-item>
         <el-descriptions-item :label="$t('vul.discoveryTime')">{{ currentVul.createTime }}</el-descriptions-item>
         <el-descriptions-item :label="$t('vul.verifyResult')" :span="2">
@@ -108,10 +120,12 @@ const statLabels = computed(() => ({
 }))
 
 const vulColumns = computed(() => [
+  { label: t('vul.vulName'), prop: 'vulName', minWidth: 200, showOverflowTooltip: true },
+  { label: t('vul.severity'), prop: 'severity', slot: 'severity', width: 100 },
   { label: t('vul.target'), prop: 'authority', minWidth: 150 },
   { label: 'URL', prop: 'url', minWidth: 250, showOverflowTooltip: true },
   { label: 'POC', prop: 'pocFile', minWidth: 200, showOverflowTooltip: true },
-  { label: t('vul.severity'), prop: 'severity', slot: 'severity', width: 100 },
+  { label: t('vul.tags'), prop: 'tags', slot: 'tags', minWidth: 150 },
   { label: t('vul.source'), prop: 'source', width: 100 },
   { label: t('vul.discoveryTime'), prop: 'createTime', width: 160 },
   { label: t('common.operation'), slot: 'operation', width: 120, fixed: 'right' }
@@ -225,14 +239,16 @@ async function handleExport(command) {
 
     if (data.length === 0) { ElMessage.warning(t('asset.noDataToExport')); return }
 
-    const headers = ['Target', 'URL', 'POC', 'Severity', 'Source', 'Result', 'CreateTime']
+    const headers = ['VulName', 'Severity', 'Target', 'URL', 'POC', 'Tags', 'Source', 'Result', 'CreateTime']
     const csvRows = [headers.join(',')]
     for (const row of data) {
       csvRows.push([
+        escapeCsvField(row.vulName || ''),
+        escapeCsvField(row.severity || ''),
         escapeCsvField(row.authority || ''),
         escapeCsvField(row.url || ''),
         escapeCsvField(row.pocFile || ''),
-        escapeCsvField(row.severity || ''),
+        escapeCsvField((row.tags || []).join(';')),
         escapeCsvField(row.source || ''),
         escapeCsvField(row.result || ''),
         escapeCsvField(row.createTime || '')
@@ -316,6 +332,11 @@ defineExpose({ refresh })
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 13px;
     line-height: 1.5;
+  }
+
+  .tag-item {
+    margin-right: 4px;
+    margin-bottom: 2px;
   }
 }
 </style>

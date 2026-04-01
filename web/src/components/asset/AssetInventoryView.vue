@@ -180,7 +180,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Filter, Sort, Clock, Refresh, Picture, Delete } from '@element-plus/icons-vue'
-import { getAssetList, batchDeleteAssets } from '@/api/asset'
+import { getAssetInventory, batchDeleteAssets } from '@/api/asset'
 
 const loading = ref(false)
 const searchQuery = ref('')
@@ -206,13 +206,19 @@ const timeFilter = ref('all')
 async function loadData() {
   loading.value = true
   try {
-    const res = await getAssetList({
+    // 转换 timeFilter 值为后端期望的 timeRange 格式
+    const timeRangeMap = { 'all': 'all', '1': '24h', '7': '7d', '30': '30d' }
+    // 转换 sortBy 值为后端期望的格式
+    const sortByMap = { 'time-desc': 'time', 'time-asc': 'time-asc', 'name-asc': 'name', 'name-desc': 'name-desc' }
+    const res = await getAssetInventory({
       page: pagination.page,
       pageSize: pagination.pageSize,
       query: searchQuery.value,
-      sortBy: sortBy.value,
-      timeFilter: timeFilter.value,
-      ...filters
+      sortBy: sortByMap[sortBy.value] || 'time',
+      timeRange: timeRangeMap[timeFilter.value] || 'all',
+      technologies: filters.tech,
+      labels: filters.labels,
+      domain: filters.domain
     })
     
     if (res.code === 0) {

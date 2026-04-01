@@ -49,7 +49,6 @@
             clearable
             :fetch-suggestions="(qs, cb) => queryFieldSearch(qs, cb, item.prop)"
             @keyup.enter="handleSearch"
-            @clear="handleSearch"
             v-bind="item.props || {}"
           />
           <el-select
@@ -61,8 +60,6 @@
             :multiple="item.multiple"
             :allow-create="item.allowCreate"
             style="min-width: 200px"
-            @change="handleSearch"
-            @clear="handleSearch"
             v-bind="item.props || {}"
           >
             <el-option
@@ -75,6 +72,7 @@
         </el-form-item>
 
         <div class="filter-actions-row">
+          <el-button type="primary" @click="applyFilters">{{ $t('asset.assetInventoryTab.apply') || '应用' }}</el-button>
           <el-button @click="resetSearch">{{ $t('asset.assetInventoryTab.reset') || '重置' }}</el-button>
         </div>
       </el-form>
@@ -195,7 +193,7 @@ defineOptions({
 const props = defineProps({
   searchPlaceholder: {
     type: String,
-    default: '搜索主机名、IP或标题...'
+    default: ''
   },
   api: {
     type: String,
@@ -482,12 +480,20 @@ function queryFieldSearch(queryString, cb, prop) {
   }
 }
 
-// Reset advanced search
+// Apply filters manually
+function applyFilters() {
+  pagination.page = 1
+  loadData()
+}
+
+// Reset advanced search and global search query
 function resetSearch() {
+  searchQuery.value = ''
   for (const key in searchForm) {
     delete searchForm[key]
   }
-  handleSearch()
+  pagination.page = 1
+  loadData()
 }
 
 // Selection changes

@@ -11,6 +11,7 @@
       :statLabels="statLabels"
       selection
       @data-changed="$emit('data-changed')"
+      :searchPlaceholder="$t('ip.searchPlaceholder')"
       :searchKeys="['ip', 'domains']"
     >
       <template #toolbar-left>
