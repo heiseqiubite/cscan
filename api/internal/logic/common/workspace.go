@@ -8,6 +8,21 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+// GetDefaultWorkspaceId 当 workspaceId 为空或 "all" 时，解析为第一个真实工作空间 ID
+// 用于写入操作（如导入资产），确保数据写入真实的工作空间集合而非 "all_xxx"
+func GetDefaultWorkspaceId(ctx context.Context, svcCtx *svc.ServiceContext, workspaceId string) string {
+	if workspaceId != "" && workspaceId != "all" {
+		return workspaceId
+	}
+
+	// 查询第一个工作空间
+	workspaces, err := svcCtx.WorkspaceModel.Find(ctx, bson.M{}, 1, 1)
+	if err != nil || len(workspaces) == 0 {
+		return "default"
+	}
+	return workspaces[0].Id.Hex()
+}
+
 // GetWorkspaceIds 获取工作空间ID列表
 // 当 workspaceId 为空或 "all" 时，返回所有工作空间ID（包括默认空间）
 func GetWorkspaceIds(ctx context.Context, svcCtx *svc.ServiceContext, workspaceId string) []string {

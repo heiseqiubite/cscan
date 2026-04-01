@@ -136,8 +136,14 @@ func (l *AssetGroupsLogic) AssetGroups(req *types.AssetGroupsReq, workspaceId st
 
 		// 按域名分组统计
 		for _, asset := range assets {
-			// 提取主域名
-			domain := extractMainDomain(asset.Host)
+			// 提取主域名：如果 Host 是 IP 且有 Domain 字段，优先用 Domain 分组
+			domain := ""
+			if isIPAddress(asset.Host) && asset.Domain != "" {
+				domain = extractMainDomain(asset.Domain)
+			}
+			if domain == "" {
+				domain = extractMainDomain(asset.Host)
+			}
 			if domain == "" {
 				continue
 			}

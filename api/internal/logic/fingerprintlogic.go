@@ -1904,17 +1904,17 @@ func (l *FingerprintMatchAssetsLogic) FingerprintMatchAssets(req *types.Fingerpr
 
 	// 获取资产列表（只获取有HTTP响应数据的资产）
 	assetModel := l.svcCtx.GetAssetModel(workspaceId)
-	// 查询有 body 或 header 或 title 的资产
-	filter := map[string]interface{}{
-		"$or": []map[string]interface{}{
-			{"body": map[string]interface{}{"$ne": ""}},
-			{"header": map[string]interface{}{"$ne": ""}},
-			{"title": map[string]interface{}{"$ne": ""}},
-			{"icon_hash": map[string]interface{}{"$ne": ""}},
+	// 查询有 body 或 header 或 title 的资产（字段带 omitempty，需同时检查 $exists）
+	filter := bson.M{
+		"$or": bson.A{
+			bson.M{"body": bson.M{"$exists": true, "$ne": ""}},
+			bson.M{"header": bson.M{"$exists": true, "$ne": ""}},
+			bson.M{"title": bson.M{"$exists": true, "$ne": ""}},
+			bson.M{"icon_hash": bson.M{"$exists": true, "$ne": ""}},
 		},
 	}
 
-	assets, err := assetModel.Find(l.ctx, filter, 0, 0)
+	assets, err := assetModel.FindFull(l.ctx, filter, 0, 0)
 	if err != nil {
 		return &types.FingerprintMatchAssetsResp{Code: 500, Msg: "获取资产列表失败: " + err.Error()}, nil
 	}

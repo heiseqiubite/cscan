@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"cscan/api/internal/logic/common"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
 	"cscan/model"
@@ -902,8 +903,8 @@ func (l *CustomPocScanAssetsLogic) CustomPocScanAssets(req *types.CustomPocScanA
 	httpsPorts := []int{443, 8443, 9443, 4443}
 	allHttpPorts := append(httpPorts, httpsPorts...)
 
-	// 获取所有HTTP资产（扩展过滤条件）
-	assetModel := l.svcCtx.GetAssetModel(workspaceId)
+	// 获取所有HTTP资产（扩展过滤条件），支持多工作空间
+	wsIds := common.GetWorkspaceIds(l.ctx, l.svcCtx, workspaceId)
 	filter := bson.M{
 		"$or": []bson.M{
 			{"is_http": true},                                                  // is_http 标记为 true
@@ -913,9 +914,16 @@ func (l *CustomPocScanAssetsLogic) CustomPocScanAssets(req *types.CustomPocScanA
 			{"authority": bson.M{"$regex": "^https?://", "$options": "i"}},      // authority 以 http:// 或 https:// 开头
 		},
 	}
-	assets, err := assetModel.Find(l.ctx, filter, 0, 0)
-	if err != nil {
-		return &types.CustomPocScanAssetsResp{Code: 500, Msg: "获取资产列表失败: " + err.Error()}, nil
+
+	var assets []model.Asset
+	for _, wsId := range wsIds {
+		assetModel := l.svcCtx.GetAssetModel(wsId)
+		wsAssets, err := assetModel.Find(l.ctx, filter, 0, 0)
+		if err != nil {
+			l.Logger.Errorf("查询工作空间 %s 资产失败: %v", wsId, err)
+			continue
+		}
+		assets = append(assets, wsAssets...)
 	}
 
 	if len(assets) == 0 {
