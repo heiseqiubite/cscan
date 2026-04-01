@@ -242,29 +242,42 @@ func (l *AssetListLogic) AssetList(req *types.AssetListReq, workspaceId string) 
 	// 如果有语法查询，解析语法
 	if req.Query != "" {
 		parseQuerySyntax(req.Query, filter)
-	} else {
-		// 快捷查询
-		if req.Host != "" {
+	}
+
+	// 独立筛选条件：无论是否有 query 都生效，且不覆盖 parseQuerySyntax 已设置的字段
+	if req.Host != "" {
+		if _, exists := filter["host"]; !exists {
 			filter["host"] = bson.M{"$regex": req.Host, "$options": "i"}
 		}
-		if req.Port > 0 {
+	}
+	if req.Port > 0 {
+		if _, exists := filter["port"]; !exists {
 			filter["port"] = req.Port
 		}
-		if req.Service != "" {
+	}
+	if req.Service != "" {
+		if _, exists := filter["service"]; !exists {
 			filter["service"] = bson.M{"$regex": req.Service, "$options": "i"}
 		}
-		if req.Title != "" {
+	}
+	if req.Title != "" {
+		if _, exists := filter["title"]; !exists {
 			filter["title"] = bson.M{"$regex": req.Title, "$options": "i"}
 		}
-		if req.App != "" {
-			// 清理指纹名称，去掉 [custom(xxx)] 后缀后再查询
+	}
+	if req.App != "" {
+		if _, exists := filter["app"]; !exists {
 			cleanedApp := cleanAppName(req.App)
 			filter["app"] = bson.M{"$regex": cleanedApp, "$options": "i"}
 		}
-		if req.HttpStatus != "" {
+	}
+	if req.HttpStatus != "" {
+		if _, exists := filter["status"]; !exists {
 			filter["status"] = req.HttpStatus
 		}
-		if req.IconHash != "" {
+	}
+	if req.IconHash != "" {
+		if _, exists := filter["icon_hash"]; !exists {
 			filter["icon_hash"] = req.IconHash
 		}
 	}
@@ -768,6 +781,15 @@ func (l *AssetClearLogic) AssetClear(workspaceId string) (resp *types.BaseResp, 
 		// 清空对应的资产历史表
 		historyModel := l.svcCtx.GetAssetHistoryModel(wsId)
 		historyModel.Clear(l.ctx)
+	}
+
+	// 清理可能残留的 all_asset 集合（早期 bug 误写入数据到此集合）
+	if workspaceId == "" || workspaceId == "all" {
+		allAssetModel := l.svcCtx.GetAssetModel("all")
+		if deleted, err := allAssetModel.Clear(l.ctx); err == nil && deleted > 0 {
+			l.Logger.Infof("清理残留 all_asset 集合: %d 条", deleted)
+			totalDeleted += deleted
+		}
 	}
 
 	return &types.BaseResp{Code: 0, Msg: "成功清空 " + strconv.FormatInt(totalDeleted, 10) + " 条资产"}, nil
