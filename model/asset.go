@@ -524,6 +524,9 @@ type StatResult struct {
 // AggregatePort 专门用于端口统计（端口是int类型）
 func (m *AssetModel) AggregatePort(ctx context.Context, limit int) ([]PortStatResult, error) {
 	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{
+			{Key: "port", Value: bson.D{{Key: "$gt", Value: 0}}},
+		}}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$port"},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
