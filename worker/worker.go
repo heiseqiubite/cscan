@@ -3523,8 +3523,20 @@ func (w *Worker) executePortIdentifyWithNmap(ctx context.Context, task *schedule
 	if totalTimeout < 60 {
 		totalTimeout = 60
 	}
-	identifyCtx, identifyCancel := context.WithTimeout(ctx, time.Duration(totalTimeout)*time.Second)
+
+	// 使用分离的 Context 以避免前面模块的超时拖累此独立模块
+	// 同时使用一个 goroutine 定期检查整个任务有没有被用户下发全局 STOP 命令
+	identifyCtx, identifyCancel := context.WithTimeout(context.Background(), time.Duration(totalTimeout)*time.Second)
 	defer identifyCancel()
+
+	// 监听父上下文取消或主动停止信号
+	go func() {
+		select {
+		case <-identifyCtx.Done():
+		case <-ctx.Done(): // 接收任务全局退出（异常停滞等）
+			identifyCancel()
+		}
+	}()
 
 	var identifiedAssets []*scanner.Asset
 	nmapScanner := w.scanners["nmap"]
@@ -3627,6 +3639,27 @@ func (w *Worker) executePortIdentifyWithFingerprintx(ctx context.Context, task *
 	if concurrency <= 0 {
 		concurrency = 10 // 默认并发10
 	}
+
+	// 计算总超时时间
+	totalTimeout := timeout * len(assets) * 2 // 指纹需要稍微宽裕些
+	if totalTimeout < 60 {
+		totalTimeout = 60
+	}
+	if totalTimeout > 1800 {
+		totalTimeout = 1800 // 指纹阶段单批次最高限额30分钟
+	}
+
+	// 同样做防超时继承处理，保证独立阶段时间充足
+	fingerCtx, fingerCancel := context.WithTimeout(context.Background(), time.Duration(totalTimeout)*time.Second)
+	defer fingerCancel()
+
+	go func() {
+		select {
+		case <-fingerCtx.Done():
+		case <-ctx.Done():
+			fingerCancel()
+		}
+	}()
 
 	// 构建 fingerprintx 选项
 	fpxOpts := &scanner.FingerprintxOptions{

@@ -311,6 +311,15 @@ func (s *NaabuScanner) scanSingleTargetWithLogger(ctx context.Context, target, p
 			mu.Lock()
 			defer mu.Unlock()
 
+			if thresholdExceeded {
+				return
+			}
+
+			if opts.PortThreshold > 0 && len(assets) >= opts.PortThreshold {
+				thresholdExceeded = true
+				return
+			}
+
 			logInfo("Naabu: OnResult callback, host=%s, ports=%d", hr.Host, len(hr.Ports))
 			host := hr.Host
 			for _, port := range hr.Ports {
