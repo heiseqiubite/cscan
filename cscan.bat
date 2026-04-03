@@ -263,9 +263,11 @@ set /p "del_data=Delete data volumes too? (Y/N): "
 if /i "!del_data!"=="Y" (
     echo [CSCAN] Stopping and removing containers and volumes...
     docker compose down -v
+    docker compose -f docker-compose-worker.yaml down -v 2>nul
 ) else (
     echo [CSCAN] Stopping and removing containers...
     docker compose down
+    docker compose -f docker-compose-worker.yaml down 2>nul
 )
 
 set /p "del_images=Delete images? (Y/N): "
@@ -274,6 +276,7 @@ if /i "!del_images!"=="Y" (
     docker rmi registry.cn-hangzhou.aliyuncs.com/txf7/cscan-api:latest 2>nul
     docker rmi registry.cn-hangzhou.aliyuncs.com/txf7/cscan-rpc:latest 2>nul
     docker rmi registry.cn-hangzhou.aliyuncs.com/txf7/cscan-web:latest 2>nul
+    docker rmi registry.cn-hangzhou.aliyuncs.com/txf7/cscan-worker:latest 2>nul
 )
 
 echo [CSCAN] Uninstall complete.
