@@ -56,6 +56,9 @@ func (l *MainTaskListLogic) MainTaskList(req *types.MainTaskListReq, workspaceId
 	if req.Status != "" {
 		filter["status"] = req.Status
 	}
+	if len(req.Tags) > 0 {
+		filter["tags"] = bson.M{"$in": req.Tags}
+	}
 
 	var total int64
 
@@ -105,9 +108,19 @@ func (l *MainTaskListLogic) MainTaskList(req *types.MainTaskListReq, workspaceId
 			return tasksWithWs[i].task.CreateTime.After(tasksWithWs[j].task.CreateTime)
 		})
 
+		// 分页保护
+		page := req.Page
+		if page < 1 {
+			page = 1
+		}
+		pageSize := req.PageSize
+		if pageSize <= 0 {
+			pageSize = 20
+		}
+
 		// 分页
-		start := (req.Page - 1) * req.PageSize
-		end := start + req.PageSize
+		start := (page - 1) * pageSize
+		end := start + pageSize
 		if start > len(tasksWithWs) {
 			start = len(tasksWithWs)
 		}
@@ -236,6 +249,7 @@ func (l *MainTaskListLogic) MainTaskList(req *types.MainTaskListReq, workspaceId
 			Config:       t.Config,
 			ProfileId:    t.ProfileId,
 			ProfileName:  t.ProfileName,
+			Tags:         t.Tags,
 			Status:       status,
 			CurrentPhase: currentPhase,
 			Progress:     progress,
@@ -999,7 +1013,7 @@ func (l *MainTaskResumeLogic) MainTaskResume(req *types.MainTaskControlReq, work
 	}
 
 	// 更新状态为STARTED
-	update := bson.M{"status": model.TaskStatusStarted}
+	update := bson.M{"status": model.TaskStatusPending}
 	if err := taskModel.Update(l.ctx, req.Id, update); err != nil {
 		l.Logger.Errorf("MainTaskResume: failed to update status, error=%v", err)
 		return &types.BaseResp{Code: 500, Msg: "更新任务状态失败"}, nil
