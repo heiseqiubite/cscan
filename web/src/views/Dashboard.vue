@@ -381,12 +381,16 @@ async function fetchSiteStat() {
 }
 
 async function fetchDirScanStat() {
-  let res = await silentFetch('/dirscan/result/stat')
-  if (!res) res = await silentFetch('/dirscan/result/list', { page: 1, pageSize: 1 })
-  if (res) {
-    stats.dirScans = res.total || 0
-    animateValue('dirScans', stats.dirScans)
+  const statRes = await silentFetch('/dirscan/result/stat')
+  if (statRes && statRes.stat) {
+    stats.dirScans = statRes.stat.total || 0
+  } else {
+    const listRes = await silentFetch('/dirscan/result/list', { page: 1, pageSize: 1 })
+    if (listRes) {
+      stats.dirScans = listRes.total || 0
+    }
   }
+  animateValue('dirScans', stats.dirScans)
 }
 
 async function fetchVulnStat() {
