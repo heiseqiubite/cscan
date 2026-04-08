@@ -254,6 +254,11 @@ func (l *AssetListLogic) AssetList(req *types.AssetListReq, workspaceId string) 
 		if _, exists := filter["port"]; !exists {
 			filter["port"] = req.Port
 		}
+	} else {
+		// 端口为空(port=0)的资产不应该出现在端口列表中
+		if _, exists := filter["port"]; !exists {
+			filter["port"] = bson.M{"$gt": 0}
+		}
 	}
 	if req.Service != "" {
 		if _, exists := filter["service"]; !exists {
