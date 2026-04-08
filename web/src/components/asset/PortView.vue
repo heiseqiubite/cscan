@@ -70,21 +70,31 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
-import request from '@/api/request'
 import ProTable from '@/components/common/ProTable.vue'
+import { useAssetView } from '@/composables/useAssetView'
 
-const { t } = useI18n()
 const emit = defineEmits(['data-changed'])
 
-const proTableRef = ref(null)
-const organizations = ref([])
-const searchPortPlaceholder = computed(() => t('asset.portNumber') || '搜索端口')
+const {
+  t, proTableRef, organizations, selectedRows,
+  loadOrganizations, handleExport
+} = useAssetView({
+  apiPrefix: '/asset/port',
+  viewType: 'port',
+  exportHeaders: ['Port', 'AssetCount', 'Services', 'Hosts', 'Organization', 'UpdateTime'],
+  exportRowFormatter: row => [
+    row.port || '',
+    row.assetCount || 0,
+    (row.services || []).join(';'),
+    (row.hosts || []).join(';'),
+    row.orgName || '',
+    row.updateTime || ''
+  ]
+})
 
-const selectedRows = computed(() => proTableRef.value?.selectedRows || [])
+const searchPortPlaceholder = computed(() => t('asset.portNumber') || '搜索端口')
 
 const portColumns = computed(() => [
   { label: '端口', prop: 'port', slot: 'port', width: 120 },
@@ -110,102 +120,15 @@ const searchItems = computed(() => [
   }
 ])
 
-async function loadOrganizations() {
-  try {
-    const res = await request.post('/organization/list', { page: 1, pageSize: 100 })
-    if (res.code === 0) organizations.value = res.list || []
-  } catch (e) {
-    console.error(e)
-  }
-}
-
 function viewAssets(row) {
   window.location.href = `/asset-management?tab=inventory&port=${encodeURIComponent(row.port)}`
-}
-
-async function handleExport(command) {
-  let data = []
-  let filename = ''
-
-  if (command === 'selected-ports') {
-    if (selectedRows.value.length === 0) { ElMessage.warning(t('common.pleaseSelect')); return }
-    data = selectedRows.value
-    filename = 'ports_selected.txt'
-  } else if (command === 'csv') {
-    ElMessage.info('正在获取全部数据...')
-    try {
-      const res = await request.post('/asset/port/list', { ...proTableRef.value?.searchForm, page: 1, pageSize: 10000 })
-      if (res.code === 0) { data = res.list || [] } else { ElMessage.error('获取数据失败'); return }
-    } catch (e) { ElMessage.error('获取数据失败'); return }
-    if (data.length === 0) { ElMessage.warning('没有可导出的数据'); return }
-
-    const headers = ['Port', 'AssetCount', 'Services', 'Hosts', 'Organization', 'UpdateTime']
-    const csvRows = [headers.join(',')]
-    for (const row of data) {
-      csvRows.push([
-        row.port || '',
-        row.assetCount || 0,
-        escapeCsvField((row.services || []).join(';')),
-        escapeCsvField((row.hosts || []).join(';')),
-        escapeCsvField(row.orgName || ''),
-        escapeCsvField(row.updateTime || '')
-      ].join(','))
-    }
-    const BOM = '\uFEFF'
-    const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `ports_${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(link); link.click(); document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    ElMessage.success(`成功导出 ${data.length} 条数据`)
-    return
-  } else {
-    ElMessage.info('正在获取全部数据...')
-    try {
-      const res = await request.post('/asset/port/list', { ...proTableRef.value?.searchForm, page: 1, pageSize: 10000 })
-      if (res.code === 0) { data = res.list || [] } else { ElMessage.error('获取数据失败'); return }
-    } catch (e) { ElMessage.error('获取数据失败'); return }
-    filename = 'ports_all.txt'
-  }
-
-  if (data.length === 0) { ElMessage.warning('没有可导出的数据'); return }
-
-  const exportData = []
-  for (const row of data) {
-    if (row.port) { exportData.push(row.port) }
-  }
-
-  if (exportData.length === 0) { ElMessage.warning('没有可导出的数据'); return }
-
-  const blob = new Blob([exportData.join('\n')], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url; link.download = filename
-  document.body.appendChild(link); link.click(); document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-  ElMessage.success(`成功导出 ${exportData.length} 个端口`)
-}
-
-function escapeCsvField(field) {
-  if (field == null) return ''
-  const str = String(field)
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return '"' + str.replace(/"/g, '""') + '"'
-  }
-  return str
 }
 
 onMounted(() => {
   loadOrganizations()
 })
 
-function refresh() {
-  proTableRef.value?.loadData()
-}
-
-defineExpose({ refresh })
+defineExpose({ refresh: () => proTableRef.value?.loadData() })
 </script>
 
 <style scoped>
