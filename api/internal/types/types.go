@@ -466,13 +466,13 @@ type AssetInventoryItem struct {
 	Port            int      `json:"port"`
 	Service         string   `json:"service"`
 	Title           string   `json:"title"`
-	Technologies    []string `json:"technologies"`    // 技术栈
-	Labels          []string `json:"labels"`          // 自定义标签
-	Status          string   `json:"status"`          // HTTP状态码
+	Technologies    []string `json:"technologies"`     // 技术栈
+	Labels          []string `json:"labels"`           // 自定义标签
+	Status          string   `json:"status"`           // HTTP状态码
 	Domain          string   `json:"domain,omitempty"` // 域名
-	LastUpdated     string   `json:"lastUpdated"`     // 最后更新时间（相对时间）
-	FirstSeen       string   `json:"firstSeen"`       // 首次发现时间（完整时间）
-	LastUpdatedFull string   `json:"lastUpdatedFull"` // 最后更新时间（完整时间）
+	LastUpdated     string   `json:"lastUpdated"`      // 最后更新时间（相对时间）
+	FirstSeen       string   `json:"firstSeen"`        // 首次发现时间（完整时间）
+	LastUpdatedFull string   `json:"lastUpdatedFull"`  // 最后更新时间（完整时间）
 	Screenshot      string   `json:"screenshot,omitempty"`
 	IconHash        string   `json:"iconHash,omitempty"`
 	IconHashBytes   string   `json:"iconHashBytes,omitempty"` // Base64编码的图标数据
@@ -536,7 +536,7 @@ type ScreenshotsResp struct {
 
 // ==================== IP管理 ====================
 type IPListReq struct {
-Query    string `json:"query,optional"`
+	Query    string `json:"query,optional"`
 	Page     int    `json:"page,default=1"`
 	PageSize int    `json:"pageSize,default=20"`
 	IP       string `json:"ip,optional"`
@@ -2584,4 +2584,110 @@ type TaskRecoveryStatsResp struct {
 	TotalWorkers    int    `json:"totalWorkers"`    // 总Worker数
 	CheckInterval   string `json:"checkInterval"`   // 检查间隔
 	TaskTimeout     string `json:"taskTimeout"`     // 任务超时时间
+}
+
+// ==================== 应用管理 ====================
+
+type AppListReq struct {
+	App      string `json:"app,optional"`
+	OrgId    string `json:"orgId,optional"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+}
+
+type AppItem struct {
+	Id         string   `json:"id"`
+	App        string   `json:"app"`
+	Category   string   `json:"category"`
+	Assets     []string `json:"assets"`
+	OrgName    string   `json:"orgName"`
+	CreateTime string   `json:"createTime"`
+}
+
+type AppListResp struct {
+	Code  int       `json:"code"`
+	Msg   string    `json:"msg"`
+	Total int64     `json:"total"`
+	List  []AppItem `json:"list"`
+}
+
+type AppStatResp struct {
+	Code     int    `json:"code"`
+	Msg      string `json:"msg"`
+	Total    int    `json:"total"`
+	NewCount int    `json:"newCount"`
+}
+
+type AppDeleteReq struct {
+	Id string `json:"id"`
+}
+
+type AppBatchDeleteReq struct {
+	Ids []string `json:"ids"`
+}
+
+// ==================== Icon 管理 ====================
+
+type IconListReq struct {
+	IconHash string `json:"icon_hash,optional"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+}
+
+type IconItem struct {
+	Id           string   `json:"id"`
+	IconHash     string   `json:"iconHash"`
+	IconHashFile string   `json:"iconHashFile"`
+	IconData     string   `json:"iconData"`
+	Screenshot   string   `json:"screenshot"`
+	Assets       []string `json:"assets"`
+	CreateTime   string   `json:"createTime"`
+	UpdateTime   string   `json:"updateTime"`
+}
+
+type IconListResp struct {
+	Code  int        `json:"code"`
+	Msg   string     `json:"msg"`
+	Total int64      `json:"total"`
+	List  []IconItem `json:"list"`
+}
+
+type IconStatResp struct {
+	Code     int    `json:"code"`
+	Msg      string `json:"msg"`
+	Total    int    `json:"total"`
+	NewCount int    `json:"newCount"`
+}
+
+type IconDeleteReq struct {
+	Id string `json:"id"`
+}
+
+type IconBatchDeleteReq struct {
+	Ids []string `json:"ids"`
+}
+
+type PortListReq struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Query    string `json:"query,optional"`
+	OrgId    string `json:"orgId,optional"`
+	Port     int    `json:"port,optional"`
+	Host     string `json:"host,optional"`
+}
+
+type PortListItem struct {
+	Port       int      `json:"port"`
+	AssetCount int      `json:"assetCount"`
+	Hosts      []string `json:"hosts"`
+	Services   []string `json:"services"`
+	OrgName    string   `json:"orgName"`
+	UpdateTime string   `json:"updateTime"`
+}
+
+type PortListResp struct {
+	Code  int            `json:"code"`
+	Msg   string         `json:"msg"`
+	Total int            `json:"total"`
+	List  []PortListItem `json:"list"`
 }
