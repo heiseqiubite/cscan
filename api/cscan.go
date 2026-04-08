@@ -212,7 +212,7 @@ func createAndPushCronTask(ctx context.Context, svcCtx *svc.ServiceContext, sche
 	// 更新任务状态为 STARTED
 	now := time.Now()
 	taskModel.Update(ctx, newTask.Id.Hex(), map[string]interface{}{
-		"status":         model.TaskStatusStarted,
+		"status":         model.TaskStatusPending,
 		"sub_task_count": subTaskCount,
 		"sub_task_done":  0,
 		"start_time":     now,
