@@ -129,7 +129,6 @@
               :src="formatScreenshotUrl(screenshot.screenshot)"
               :alt="screenshot.name"
               class="screenshot-image"
-              loading="lazy"
               @error="handleScreenshotError"
             />
             <div v-else class="no-screenshot">
@@ -222,7 +221,6 @@
             :src="formatScreenshotUrl(selectedScreenshot.screenshot)"
             :alt="selectedScreenshot.name"
             class="large-image"
-            loading="lazy"
             @error="handleScreenshotError"
           />
           <div v-else class="no-screenshot-large">
