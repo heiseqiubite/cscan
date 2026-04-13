@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -247,12 +246,18 @@ func (s *SubfinderScanner) enumerateDomain(ctx context.Context, domain string, o
 	if len(opts.ProviderConfig) > 0 {
 		configContent := BuildProviderConfig(opts.ProviderConfig)
 		if configContent != "" {
-			tmpDir := os.TempDir()
-			tempConfigFile = filepath.Join(tmpDir, "subfinder_provider_config.yaml")
-			if err := os.WriteFile(tempConfigFile, []byte(configContent), 0600); err != nil {
-				logx.Errorf("Failed to write provider config: %v", err)
+			tmpFile, err := os.CreateTemp("", "subfinder_provider_config_*.yaml")
+			if err != nil {
+				logx.Errorf("Failed to create provider config temp file: %v", err)
 				tempConfigFile = ""
 			} else {
+				tempConfigFile = tmpFile.Name()
+				defer os.Remove(tempConfigFile)
+				
+				if _, err := tmpFile.Write([]byte(configContent)); err != nil {
+					logx.Errorf("Failed to write config content: %v", err)
+				}
+				tmpFile.Close()
 				logx.Infof("Created provider config: %s", tempConfigFile)
 			}
 		}
