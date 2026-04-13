@@ -319,7 +319,9 @@ func WorkerLogsExportHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			req.Format = "json"
 		}
 
-		logs, err := svcCtx.RedisClient.XRevRange(r.Context(), "cscan:worker:logs", "+", "-").Result()
+		// 限制最大导出数量，防止 OOM
+		const maxExportCount = 10000
+		logs, err := svcCtx.RedisClient.XRevRangeN(r.Context(), "cscan:worker:logs", "+", "-", maxExportCount).Result()
 		if err != nil {
 			response.Error(w, err)
 			return
