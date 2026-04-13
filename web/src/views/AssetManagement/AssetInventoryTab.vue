@@ -16,17 +16,6 @@
         <AssetInventoryCardView v-if="activeLeftTab === 'comprehensive'" />
       </el-tab-pane>
 
-      <!-- 端口 (Ports) -->
-      <el-tab-pane name="port">
-        <template #label>
-          <span class="left-tab-label">
-            <el-icon><List /></el-icon>
-            {{ $t('asset.port') || '端口' }}
-          </span>
-        </template>
-        <PortView v-if="activeLeftTab === 'port'" />
-      </el-tab-pane>
-
       <!-- 域名 (Domains) -->
       <el-tab-pane name="domain">
         <template #label>
@@ -49,6 +38,17 @@
         <IPView v-if="activeLeftTab === 'ip'" />
       </el-tab-pane>
 
+      <!-- 端口 (Ports) -->
+      <el-tab-pane name="port">
+        <template #label>
+          <span class="left-tab-label">
+            <el-icon><List /></el-icon>
+            {{ $t('asset.port') || '端口' }}
+          </span>
+        </template>
+        <PortView v-if="activeLeftTab === 'port'" />
+      </el-tab-pane>
+
       <!-- 站点 (Sites) -->
       <el-tab-pane name="site">
         <template #label>
@@ -58,28 +58,6 @@
           </span>
         </template>
         <SiteView v-if="activeLeftTab === 'site'" />
-      </el-tab-pane>
-
-      <!-- 目录扫描 (Directory Scans) -->
-      <el-tab-pane name="dirscan">
-        <template #label>
-          <span class="left-tab-label">
-            <el-icon><Folder /></el-icon>
-            {{ $t('asset.dirManagement') || '目录扫描' }}
-          </span>
-        </template>
-        <DirScanView v-if="activeLeftTab === 'dirscan'" />
-      </el-tab-pane>
-
-      <!-- 漏洞风险 (Vuls) -->
-      <el-tab-pane name="vul">
-        <template #label>
-          <span class="left-tab-label">
-            <el-icon><Warning /></el-icon>
-            {{ $t('asset.vulnerability') || '漏洞风险' }}
-          </span>
-        </template>
-        <VulView v-if="activeLeftTab === 'vul'" />
       </el-tab-pane>
 
       <!-- Icon -->
@@ -103,6 +81,29 @@
         </template>
         <AppView v-if="activeLeftTab === 'app'" />
       </el-tab-pane>
+
+      <!-- 目录扫描 (Directory Scans) -->
+      <el-tab-pane name="dirscan">
+        <template #label>
+          <span class="left-tab-label">
+            <el-icon><Folder /></el-icon>
+            {{ $t('asset.dirManagement') || '目录' }}
+          </span>
+        </template>
+        <DirScanView v-if="activeLeftTab === 'dirscan'" />
+      </el-tab-pane>
+
+      <!-- 漏洞风险 (Vuls) -->
+      <el-tab-pane name="vul">
+        <template #label>
+          <span class="left-tab-label">
+            <el-icon><Warning /></el-icon>
+            {{ $t('asset.vulnerability') || '漏洞风险' }}
+          </span>
+        </template>
+        <VulView v-if="activeLeftTab === 'vul'" />
+      </el-tab-pane>
+
     </el-tabs>
   </div>
 </template>
@@ -160,40 +161,6 @@ watch(() => route.query.subTab, (newTab) => {
   .asset-left-tabs {
     height: 100%;
 
-    // Style the left pane
-    :deep(.el-tabs__header.is-left) {
-      margin-right: 0;
-      background-color: hsl(var(--muted) / 0.3);
-      padding: 16px 0;
-      border-right: 1px solid hsl(var(--border));
-      min-width: 160px;
-    }
-
-    :deep(.el-tabs__active-bar) {
-      right: 0;
-      left: auto !important;
-    }
-
-    :deep(.el-tabs__item.is-left) {
-      text-align: left;
-      justify-content: flex-start;
-      height: 48px;
-      line-height: 48px;
-      padding: 0 20px;
-      display: flex;
-      align-items: center;
-      transition: all 0.2s;
-
-      &.is-active {
-        background-color: hsl(var(--primary) / 0.1);
-        font-weight: 600;
-      }
-
-      &:hover:not(.is-active) {
-        background-color: hsl(var(--muted) / 0.8);
-      }
-    }
-
     // Style the content pane
     :deep(.el-tabs__content) {
       padding: 20px;
@@ -201,18 +168,57 @@ watch(() => route.query.subTab, (newTab) => {
       overflow-y: auto;
       flex: 1;
     }
-
-    // Custom label inside tab
-    .left-tab-label {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-
-      .el-icon {
-        font-size: 18px;
-      }
-    }
   }
+}
+</style>
+
+<!-- 非 scoped 样式用于覆盖 Element Plus 默认样式 -->
+<style lang="scss">
+.el-tabs.asset-left-tabs .el-tabs__header.is-left {
+  margin-right: 0 !important;
+  background-color: hsl(var(--muted) / 0.3) !important;
+  padding: 16px 0 !important;
+  border-right: 1px solid hsl(var(--border)) !important;
+  min-width: auto !important;
+  width: auto !important;
+}
+
+.el-tabs.asset-left-tabs .el-tabs__item.is-left {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  height: 48px !important;
+  line-height: 48px !important;
+  padding: 0 50px 0 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  transition: all 0.2s;
+}
+
+.el-tabs.asset-left-tabs .el-tabs__item.is-left.is-active {
+  background-color: hsl(var(--primary) / 0.1) !important;
+  font-weight: 600 !important;
+}
+
+.el-tabs.asset-left-tabs .el-tabs__item.is-left:hover:not(.is-active) {
+  background-color: hsl(var(--muted) / 0.8) !important;
+}
+
+.el-tabs.asset-left-tabs .el-tabs__active-bar.is-left {
+  right: 0 !important;
+  left: auto !important;
+}
+
+.el-tabs.asset-left-tabs .el-tabs__item.is-left .left-tab-label {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px;
+  font-size: 14px;
+  width: 100%;
+}
+
+.el-tabs.asset-left-tabs .el-tabs__item.is-left .left-tab-label .el-icon {
+  font-size: 18px !important;
 }
 </style>
