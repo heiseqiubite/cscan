@@ -170,10 +170,42 @@ func (s *NaabuScanner) Scan(ctx context.Context, config *ScanConfig) (*ScanResul
 	}
 
 	// 解析目标
-	targets := parseTargets(config.Target)
-	if len(config.Targets) > 0 {
-		targets = append(targets, config.Targets...)
+	targetParseResult := ParseTargetsForPortScan(config.Target)
+	for _, t := range config.Targets {
+		res := ParseTargetsForPortScan(t)
+		targetParseResult.WithPort = append(targetParseResult.WithPort, res.WithPort...)
+		targetParseResult.WithoutPort = append(targetParseResult.WithoutPort, res.WithoutPort...)
 	}
+
+	var cleanTargets []string
+	seenHost := make(map[string]bool)
+
+	for _, host := range targetParseResult.WithoutPort {
+		if !seenHost[host] {
+			seenHost[host] = true
+			cleanTargets = append(cleanTargets, host)
+		}
+	}
+
+	ports := parsePorts(opts.Ports)
+	portSet := make(map[int]bool)
+	for _, p := range ports {
+		portSet[p] = true
+	}
+
+	for _, taskWithPort := range targetParseResult.WithPort {
+		if !seenHost[taskWithPort.Host] {
+			seenHost[taskWithPort.Host] = true
+			cleanTargets = append(cleanTargets, taskWithPort.Host)
+		}
+		if !portSet[taskWithPort.Port] {
+			portSet[taskWithPort.Port] = true
+			ports = append(ports, taskWithPort.Port)
+		}
+	}
+
+	targets := cleanTargets
+	opts.Ports = portsToString(ports)
 
 	if len(targets) == 0 {
 		return &ScanResult{
