@@ -9,6 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/uuid v1.6.0
 	github.com/leanovate/gopter v0.2.11
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260409130608-36c9de10bb8f
 	github.com/praetorian-inc/fingerprintx v1.1.19
 	github.com/projectdiscovery/dnsx v1.2.3
 	github.com/projectdiscovery/goflags v0.1.74
