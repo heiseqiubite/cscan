@@ -5,7 +5,7 @@ ARG VERSION
 WORKDIR /app
 
 # 安装编译依赖
-RUN apk add --no-cache git gcc musl-dev libpcap-dev
+RUN apk add --no-cache git gcc musl-dev libpcap-dev curl
 
 # 复制依赖文件并下载
 COPY go.mod go.sum ./
@@ -13,6 +13,12 @@ RUN go mod download
 
 # 复制源代码
 COPY . .
+
+# 下载 ip2region 数据库（编译时准备）
+RUN mkdir -p /app/data && \
+    curl -sL "https://github.com/lionsoul2014/ip2region/raw/master/data/ip2region_v4.xdb" -o /app/data/ip2region_v4.xdb && \
+    curl -sL "https://github.com/lionsoul2014/ip2region/raw/master/data/ip2region_v6.xdb" -o /app/data/ip2region_v6.xdb && \
+    echo "ip2region databases downloaded"
 
 # 编译 worker
 RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.Version=${VERSION}" \
@@ -40,6 +46,9 @@ RUN apk add --no-cache \
 
 # 设置时区
 ENV TZ=Asia/Shanghai
+
+# 复制 ip2region 数据库
+COPY --from=builder /app/data ./data/
 
 # 复制二进制文件
 COPY --from=builder /cscan-worker /cscan-worker
