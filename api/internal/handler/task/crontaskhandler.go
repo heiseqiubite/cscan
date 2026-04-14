@@ -290,7 +290,7 @@ func CronTaskSaveHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 
 		if mainTask == nil {
-			response.Error(w, fmt.Errorf("关联的任务不存在"))
+			response.ParamError(w, "关联的任务不存在")
 			return
 		}
 		workspaceId = foundWorkspaceId
@@ -337,7 +337,7 @@ func CronTaskSaveHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			// 更新 - 从MongoDB获取并更新
 			existingTask, err := svcCtx.CronTaskModel.FindByCronTaskId(ctx, req.Id)
 			if err != nil || existingTask == nil {
-				response.Error(w, fmt.Errorf("定时任务不存在"))
+				response.ParamError(w, "定时任务不存在")
 				return
 			}
 
@@ -352,6 +352,7 @@ func CronTaskSaveHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 				"target":        target,
 				"config":        config,
 				"next_run_time": nextRunTime,
+				"status":        "enable",
 			}
 			if err := svcCtx.CronTaskModel.UpdateByCronTaskId(ctx, req.Id, update); err != nil {
 				response.Error(w, fmt.Errorf("更新定时任务失败: %v", err))
@@ -395,7 +396,7 @@ func CronTaskToggleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		// 从MongoDB获取现有任务
 		task, err := svcCtx.CronTaskModel.FindByCronTaskId(ctx, req.Id)
 		if err != nil || task == nil {
-			response.Error(w, fmt.Errorf("任务不存在"))
+			response.ParamError(w, "任务不存在")
 			return
 		}
 
@@ -404,14 +405,29 @@ func CronTaskToggleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		// 如果启用，更新下次运行时间
 		if req.Status == "enable" {
 			if task.ScheduleType == "cron" {
-				if schedule, err := cronParser.Parse(task.CronSpec); err == nil {
-					nextRun := schedule.Next(time.Now()).Local().Format("2006-01-02 15:04:05")
-					update["next_run_time"] = nextRun
+				if task.CronSpec == "" {
+					response.ParamError(w, "Cron表达式为空，请先编辑任务设置Cron表达式")
+					return
 				}
+				schedule, parseErr := cronParser.Parse(task.CronSpec)
+				if parseErr != nil {
+					response.ParamError(w, fmt.Sprintf("Cron表达式无效，请先编辑任务修正: %v", parseErr))
+					return
+				}
+				nextRun := schedule.Next(time.Now()).Local().Format("2006-01-02 15:04:05")
+				update["next_run_time"] = nextRun
 			} else if task.ScheduleType == "once" {
-				t, _ := time.ParseInLocation("2006-01-02 15:04:05", task.ScheduleTime, time.Local)
+				if task.ScheduleTime == "" {
+					response.ParamError(w, "执行时间未设置，请先编辑任务设置执行时间")
+					return
+				}
+				t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", task.ScheduleTime, time.Local)
+				if parseErr != nil {
+					response.ParamError(w, "执行时间格式无效，请先编辑任务重新设置")
+					return
+				}
 				if t.Before(time.Now()) {
-					response.Error(w, fmt.Errorf("指定的执行时间已过，请修改执行时间"))
+					response.ParamError(w, "指定的执行时间已过，请先编辑任务修改执行时间")
 					return
 				}
 				update["next_run_time"] = task.ScheduleTime
