@@ -86,8 +86,8 @@ func (v *ConfigValidator) validatePortScan(config *PortScanConfig) error {
 		errs = append(errs, xerr.NewConfigError("portscan.portThreshold", config.PortThreshold, "portThreshold must be non-negative"))
 	}
 
-	if config.Tool != "" && config.Tool != "naabu" && config.Tool != "masscan" && config.Tool != "tcp" {
-		errs = append(errs, xerr.NewConfigError("portscan.tool", config.Tool, "invalid tool, must be one of: naabu, masscan, tcp"))
+	if config.Tool != "" && config.Tool != "naabu" && config.Tool != "masscan" && config.Tool != "tcp" && config.Tool != "gogo" && config.Tool != "nmap" {
+		errs = append(errs, xerr.NewConfigError("portscan.tool", config.Tool, "invalid tool, must be one of: naabu, masscan, tcp, gogo, nmap"))
 	}
 
 	if config.ScanType != "" && config.ScanType != "s" && config.ScanType != "c" {

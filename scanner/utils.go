@@ -180,15 +180,15 @@ func generateAssetsFromTargetsWithResolver(target string, resolver dnsResolver) 
 			pt := parseSingleTarget(info)
 			assets = append(assets, buildAssetFromParsed(pt, category, resolver))
 		} else {
-			// 用户输入纯域名/IP（无协议无端口），默认传不带端口的目标
+			// 用户输入纯域名/IP（无协议无端口），默认使用80端口
 			asset := &Asset{
 				Host:      info.Host,
-				Port:      0,
+				Port:      80,
 				Category:  category,
 				Source:    "user_input",
 				IsHTTP:    true,
-				Authority: info.Host,
-				Service:   "",
+				Authority: utils.BuildTargetWithPort(info.Host, 80),
+				Service:   "http",
 			}
 			assets = append(assets, enrichAssetWithDNS(asset, resolver))
 		}

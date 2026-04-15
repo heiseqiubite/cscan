@@ -1107,3 +1107,38 @@ func (c *WorkerHTTPClient) RecoverTasks(ctx context.Context) (*TaskRecoveryResp,
 
 	return &resp, nil
 }
+
+// ==================== Gogo Config ====================
+
+// GogoConfigReq Gogo配置获取请求
+type GogoConfigReq struct {
+}
+
+// GogoConfigData Gogo配置数据
+type GogoConfigData struct {
+	URL string `json:"url"`
+	Key string `json:"key"`
+}
+
+// GogoConfigResp Gogo配置响应
+type GogoConfigResp struct {
+	Code    int           `json:"code"`
+	Msg     string        `json:"msg"`
+	Success bool          `json:"success"`
+	Data    GogoConfigData `json:"data"`
+}
+
+// GetGogoConfig 获取Gogo配置
+func (c *WorkerHTTPClient) GetGogoConfig(ctx context.Context) (*GogoConfigResp, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/api/v1/worker/config/gogo", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp GogoConfigResp
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal response failed: %w", err)
+	}
+
+	return &resp, nil
+}

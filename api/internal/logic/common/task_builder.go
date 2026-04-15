@@ -127,6 +127,11 @@ func (b *TaskBuilder) pushSingleBatch(workspaceId string, task *model.MainTask, 
 }
 
 func (b *TaskBuilder) prewriteInitialAssets(workspaceId string, task *model.MainTask, taskConfig map[string]interface{}, batches []string) error {
+	// 如果启用了端口扫描模块，不预生成资产，由端口扫描器发现实际开放的端口
+	if isPortScanEnabled(taskConfig) {
+		return nil
+	}
+
 	assetModel := b.svcCtx.GetAssetModel(workspaceId)
 	orgId, _ := taskConfig["orgId"].(string)
 	assets := collectInitialAssets(batches)
@@ -138,6 +143,17 @@ func (b *TaskBuilder) prewriteInitialAssets(workspaceId string, task *model.Main
 	}
 
 	return nil
+}
+
+// isPortScanEnabled 检查是否启用了端口扫描模块
+func isPortScanEnabled(taskConfig map[string]interface{}) bool {
+	// 检查端口扫描模块（naabu/gogo/masscan），配置中 key 是 "portscan"
+	if portScan, ok := taskConfig["portscan"].(map[string]interface{}); ok {
+		if enable, _ := portScan["enable"].(bool); enable {
+			return true
+		}
+	}
+	return false
 }
 
 func collectInitialAssets(batches []string) []*scanner.Asset {
@@ -182,6 +198,11 @@ func buildPrewriteAssetKey(asset *scanner.Asset) string {
 }
 
 func (b *TaskBuilder) upsertInitialAsset(assetModel *model.AssetModel, task *model.MainTask, scanAsset *scanner.Asset, orgId string) error {
+	// 跳过 Port 为 0 的无效资产
+	if scanAsset.Port == 0 {
+		return nil
+	}
+
 	asset := convertScannerAssetToModelAsset(task, scanAsset, orgId)
 
 	var existing *model.Asset

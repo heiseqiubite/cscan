@@ -181,9 +181,37 @@
                 <el-radio-group v-model="form.portscanTool">
                   <el-radio label="naabu">Naabu ({{ $t('task.recommended') }})</el-radio>
                   <el-radio label="masscan">Masscan</el-radio>
+                  <el-radio label="gogo">Gogo ({{ $t('task.portFingerprintVulnHint') }})</el-radio>
                 </el-radio-group>
               </el-form-item>
-              <el-form-item :label="$t('task.portRange')">
+              <template v-if="form.portscanTool === 'gogo'">
+                <el-form-item :label="$t('task.port')">
+                  <el-input v-model="form.gogoPorts" placeholder="80,443,8080 或 top100" />
+                </el-form-item>
+                <el-row :gutter="20">
+                  <el-col :span="12">
+                    <el-form-item :label="$t('task.concurrentThreads')">
+                      <el-input-number v-model="form.gogoThreads" :min="1" :max="2000" style="width:100%" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item :label="$t('task.fingerprintDepth')">
+                      <el-select v-model="form.gogoVersionLevel" style="width:100%">
+                        <el-option label="基础 (0)" :value="0" />
+                        <el-option label="标准 (1)" :value="1" />
+                        <el-option label="深度 (2)" :value="2" />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item :label="$t('task.vulnDetect')">
+                  <el-select v-model="form.gogoExploit" style="width:100%">
+                    <el-option label="关闭" value="none" />
+                    <el-option label="自动" value="auto" />
+                  </el-select>
+                </el-form-item>
+              </template>
+              <el-form-item v-if="form.portscanTool !== 'gogo'" :label="$t('task.portRange')">
                 <el-select v-model="form.ports" filterable allow-create default-first-option style="width: 100%">
                   <el-option :label="$t('task.top100Ports')" value="top100" />
                   <el-option :label="$t('task.top1000Ports')" value="top1000" />
@@ -191,7 +219,7 @@
                   <el-option :label="'1-65535 - ' + $t('task.allPorts')" value="1-65535" />
                 </el-select>
               </el-form-item>
-              <el-row :gutter="20">
+              <el-row :gutter="20" v-if="form.portscanTool !== 'gogo'">
                 <el-col :span="12">
                   <el-form-item :label="$t('task.scanRate')">
                     <el-input-number v-model="form.portscanRate" :min="100" :max="100000" style="width:100%" />
@@ -248,7 +276,7 @@
                   </el-form-item>
                 </el-col>
               </el-row>
-              <el-form-item :label="$t('task.advancedOptions')">
+              <el-form-item v-if="form.portscanTool !== 'gogo'" :label="$t('task.advancedOptions')">
                 <div style="display: block; width: 100%">
                   <el-checkbox v-model="form.skipHostDiscovery">{{ $t('task.skipHostDiscovery') }} (-Pn)</el-checkbox>
                   <span class="form-hint">{{ $t('task.skipHostDiscoveryHint') }}</span>
@@ -258,7 +286,7 @@
                   <span class="form-hint">{{ $t('task.excludeCdnHint') }}</span>
                 </div>
               </el-form-item>
-              <el-form-item :label="$t('task.excludeTargets')">
+              <el-form-item v-if="form.portscanTool !== 'gogo'" :label="$t('task.excludeTargets')">
                 <el-input v-model="form.excludeHosts" placeholder="192.168.1.1,10.0.0.0/8" />
                 <span class="form-hint">{{ $t('task.excludeTargetsHint') }}</span>
               </el-form-item>
@@ -1094,7 +1122,13 @@ const form = reactive({
   dirscanFilterMode: 'or',
   dirscanRate: 0,
   dirscanRecursion: false,
-  dirscanRecursionDepth: 2
+  dirscanRecursionDepth: 2,
+  // Gogo 快速扫描
+  gogoEnable: false,
+  gogoPorts: '80,443,8080',
+  gogoThreads: 500,
+  gogoVersionLevel: 1,
+  gogoExploit: 'none'
 })
 
 // 判断是否有前序扫描阶段启用（用于控制强制扫描开关的显隐）
@@ -1238,7 +1272,7 @@ function applyConfig(config) {
     domainscanWildcardDetect: config.domainscan?.wildcardDetect ?? true,
     // 端口扫描
     portscanEnable: config.portscan?.enable ?? true,
-    portscanTool: config.portscan?.tool || 'naabu',
+    portscanTool: config.portscan?.gogo?.enable ? 'gogo' : (config.portscan?.tool || 'naabu'),
     portscanRate: config.portscan?.rate || 1000,
     ports: config.portscan?.ports || 'top100',
     portThreshold: config.portscan?.portThreshold || 100,
@@ -1283,7 +1317,13 @@ function applyConfig(config) {
     dirscanDictIds: config.dirscan?.dictIds || [],
     dirscanThreads: config.dirscan?.threads || 50,
     dirscanTimeout: config.dirscan?.timeout || 10,
-    dirscanFollowRedirect: config.dirscan?.followRedirect ?? false
+    dirscanFollowRedirect: config.dirscan?.followRedirect ?? false,
+    // Gogo 快速扫描 (从 portscan.gogo 中加载)
+    gogoEnable: config.portscan?.gogo?.enable ?? false,
+    gogoPorts: config.portscan?.gogo?.ports || '80,443,8080',
+    gogoThreads: config.portscan?.gogo?.threads || 500,
+    gogoVersionLevel: config.portscan?.gogo?.versionLevel ?? 1,
+    gogoExploit: config.portscan?.gogo?.exploit || 'none'
   })
 
   // 恢复选择的模板
@@ -1371,7 +1411,13 @@ watch(
     dirscanDictIds: form.dirscanDictIds,
     dirscanThreads: form.dirscanThreads,
     dirscanTimeout: form.dirscanTimeout,
-    dirscanFollowRedirect: form.dirscanFollowRedirect
+    dirscanFollowRedirect: form.dirscanFollowRedirect,
+    // Gogo 快速扫描
+    gogoEnable: form.gogoEnable,
+    gogoPorts: form.gogoPorts,
+    gogoThreads: form.gogoThreads,
+    gogoVersionLevel: form.gogoVersionLevel,
+    gogoExploit: form.gogoExploit
   }),
   () => {
     if (!isEdit.value) {
@@ -1501,6 +1547,21 @@ function buildConfig() {
       rate: form.dirscanRate,
       recursion: form.dirscanRecursion,
       recursionDepth: form.dirscanRecursionDepth
+    }
+  }
+
+  // Gogo 配置放在 portscan 中（统一使用 portscan 的字段，scanner 统一读取）
+  if (form.portscanTool === 'gogo') {
+    config.portscan.ports = form.gogoPorts
+    config.portscan.threads = form.gogoThreads
+    config.portscan.versionLevel = form.gogoVersionLevel
+    config.portscan.exploit = form.gogoExploit
+    config.portscan.gogo = {
+      enable: true,
+      ports: form.gogoPorts,
+      threads: form.gogoThreads,
+      versionLevel: form.gogoVersionLevel,
+      exploit: form.gogoExploit
     }
   }
 

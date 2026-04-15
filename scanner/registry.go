@@ -185,6 +185,11 @@ func (r *ScannerRegistry) RegisterBuiltins() {
 	r.Register("fingerprintx", func(cfg *ScannerRegistryConfig) (Scanner, error) {
 		return NewFingerprintxScanner(), nil
 	})
+
+	// Gogo 扫描器
+	r.Register("gogo", func(cfg *ScannerRegistryConfig) (Scanner, error) {
+		return NewGogoScanner(), nil
+	})
 }
 
 // ScannerInfo 扫描器信息

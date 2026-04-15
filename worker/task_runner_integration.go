@@ -430,6 +430,43 @@ func (e *PortScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 					openPorts = append(openPorts, result.Assets...)
 				}
 			}
+		case "gogo":
+			w.taskLog(task.TaskId, LevelInfo, "Port scan: Gogo (%d targets)", len(parseResult.WithoutPort))
+			if s, ok := w.scanners["gogo"]; ok {
+				// 加载 Gogo 配置
+				if w.gogoConfig == nil {
+					gogoConfigResp, err := w.httpClient.GetGogoConfig(ctx.Ctx)
+					if err != nil {
+						w.taskLog(task.TaskId, LevelWarn, "Failed to get gogo config: %v, using default", err)
+					} else if gogoConfigResp != nil && gogoConfigResp.Success {
+						w.gogoConfig = &scanner.CyberhubConfig{
+							URL: gogoConfigResp.Data.URL,
+							Key: gogoConfigResp.Data.Key,
+						}
+						w.taskLog(task.TaskId, LevelInfo, "Gogo config loaded: URL=%s", w.gogoConfig.URL)
+					}
+				}
+				result, err := s.Scan(portCtx, &scanner.ScanConfig{
+					Target:         targetStr,
+					Options:        config,
+					WorkspaceId:    task.WorkspaceId,
+					MainTaskId:     task.MainTaskId,
+					TaskLogger:     taskLogger,
+					OnProgress:     onProgress,
+					CyberhubConfig: w.gogoConfig,
+				})
+				if err != nil {
+					w.taskLog(task.TaskId, LevelError, "Gogo error: %v", err)
+				}
+				if result != nil && len(result.Assets) > 0 {
+					openPorts = append(openPorts, result.Assets...)
+				}
+				// 保存 gogo 发现的漏洞
+				if result != nil && len(result.Vulnerabilities) > 0 {
+					w.saveVulResult(ctx.Ctx, task.WorkspaceId, task.MainTaskId, result.Vulnerabilities)
+					w.taskLog(task.TaskId, LevelInfo, "Gogo found %d vulnerabilities", len(result.Vulnerabilities))
+				}
+			}
 		default:
 			w.taskLog(task.TaskId, LevelInfo, "Port scan: Naabu (%d targets)", len(parseResult.WithoutPort))
 			if s, ok := w.scanners["naabu"]; ok {

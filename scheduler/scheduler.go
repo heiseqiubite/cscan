@@ -465,7 +465,7 @@ type DirScanConfig struct {
 
 type PortScanConfig struct {
 	Enable            bool   `json:"enable"`
-	Tool              string `json:"tool"` // tcp, masscan, naabu
+	Tool              string `json:"tool"` // tcp, masscan, naabu, gogo
 	Ports             string `json:"ports"`
 	Rate              int    `json:"rate"`              // 每秒发送包数，默认3000，建议3000-7000
 	Timeout           int    `json:"timeout"`           // 端口扫描超时时间(秒)，默认5秒
@@ -478,6 +478,16 @@ type PortScanConfig struct {
 	WarmUpTime        int    `json:"warmUpTime"`        // 扫描阶段间等待时间(秒)，默认1，建议0-1
 	Workers           int    `json:"workers"`           // Naabu内部工作线程，默认50，建议50-100
 	Verify            bool   `json:"verify"`            // TCP验证，默认false（禁用以提速）
+	Gogo              *GogoConfig `json:"gogo,omitempty"` // Gogo 扫描配置
+}
+
+// GogoConfig Gogo扫描配置
+type GogoConfig struct {
+	Enable       bool   `json:"enable"`
+	Ports        string `json:"ports"`
+	Threads      int    `json:"threads"`
+	VersionLevel int    `json:"versionLevel"`
+	Exploit      string `json:"exploit"`
 }
 
 // PortIdentifyConfig 端口识别配置（Nmap/Fingerprintx 服务识别）

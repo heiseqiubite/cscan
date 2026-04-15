@@ -376,10 +376,14 @@ func (r *TaskRunner) executePhase(taskCtx *TaskContext, phaseConfig PhaseConfig)
 
 // executePhaseDefault 默认阶段执行逻辑
 func (r *TaskRunner) executePhaseDefault(taskCtx *TaskContext, phaseConfig PhaseConfig) (*PhaseResult, error) {
+	// 获取扫描器名称（根据配置中的 tool 字段选择）
+	scannerName := r.getScannerForPhase(taskCtx, phaseConfig)
+	r.Log(LevelInfo, "executePhaseDefault: phase=%s, selected scanner=%s", phaseConfig.Phase, scannerName)
+
 	// 获取扫描器
-	s, ok := r.scanners[phaseConfig.Scanner]
+	s, ok := r.scanners[scannerName]
 	if !ok {
-		r.Log(LevelWarn, "Scanner %s not found for phase %s", phaseConfig.Scanner, phaseConfig.Name)
+		r.Log(LevelWarn, "Scanner %s not found for phase %s", scannerName, phaseConfig.Name)
 		return &PhaseResult{}, nil
 	}
 
@@ -408,6 +412,36 @@ func (r *TaskRunner) executePhaseDefault(taskCtx *TaskContext, phaseConfig Phase
 		Assets:          result.Assets,
 		Vulnerabilities: result.Vulnerabilities,
 	}, nil
+}
+
+// getScannerForPhase 根据阶段配置中的 tool 字段选择扫描器
+func (r *TaskRunner) getScannerForPhase(taskCtx *TaskContext, phaseConfig PhaseConfig) string {
+	// 默认使用 phaseConfig 中指定的扫描器
+	scannerName := phaseConfig.Scanner
+
+	config := taskCtx.Config
+	if config == nil {
+		return scannerName
+	}
+
+	// 根据阶段和配置中的 tool 字段选择扫描器
+	switch phaseConfig.Phase {
+	case PhasePortScan:
+		if config.PortScan != nil {
+			switch config.PortScan.Tool {
+			case "gogo":
+				scannerName = "gogo"
+			case "masscan":
+				scannerName = "masscan"
+			case "nmap":
+				scannerName = "nmap"
+			default:
+				scannerName = "naabu"
+			}
+		}
+	}
+
+	return scannerName
 }
 
 // getPhaseOptions 获取阶段特定选项

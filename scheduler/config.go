@@ -238,7 +238,7 @@ func ValidateTaskConfig(config *TaskConfig) error {
 	v := NewSimpleValidator()
 
 	if config.PortScan != nil && config.PortScan.Enable {
-		v.OneOf("portscan.tool", config.PortScan.Tool, "tcp", "masscan", "nmap", "naabu")
+		v.OneOf("portscan.tool", config.PortScan.Tool, "tcp", "masscan", "nmap", "naabu", "gogo")
 		v.NonNegative("portscan.rate", config.PortScan.Rate)
 		v.NonNegative("portscan.timeout", config.PortScan.Timeout)
 	}

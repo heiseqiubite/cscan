@@ -744,3 +744,41 @@ func WorkerConfigSubdomainDictHandler(svcCtx *svc.ServiceContext) http.HandlerFu
 		})
 	}
 }
+
+// ==================== Gogo Config Types ====================
+
+// WorkerGogoReq Gogo配置获取请求
+type WorkerGogoReq struct {
+}
+
+// WorkerGogoData Gogo配置数据
+type WorkerGogoData struct {
+	URL string `json:"url"`
+	Key string `json:"key"`
+}
+
+// WorkerGogoResp Gogo配置获取响应
+type WorkerGogoResp struct {
+	Code    int         `json:"code"`
+	Msg     string      `json:"msg"`
+	Success bool        `json:"success"`
+	Data    WorkerGogoData `json:"data"`
+}
+
+// ==================== Gogo Handler ====================
+
+// WorkerConfigGogoHandler Gogo配置获取接口
+// POST /api/v1/worker/config/gogo
+func WorkerConfigGogoHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		httpx.OkJson(w, &WorkerGogoResp{
+			Code:    0,
+			Msg:     "success",
+			Success: true,
+			Data: WorkerGogoData{
+				URL: svcCtx.Config.Cyberhub.URL,
+				Key: svcCtx.Config.Cyberhub.Key,
+			},
+		})
+	}
+}

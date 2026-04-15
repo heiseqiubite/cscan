@@ -50,6 +50,9 @@ type Worker struct {
 	wg         sync.WaitGroup
 	mu         sync.Mutex
 
+	// Gogo 配置缓存
+	gogoConfig *scanner.CyberhubConfig
+
 	taskStarted  int
 	taskExecuted int
 	isRunning    bool
@@ -461,6 +464,7 @@ func (w *Worker) registerScanners() {
 	w.scanners["nmap"] = scanner.NewNmapScanner()
 	w.scanners["fingerprintx"] = scanner.NewFingerprintxScanner()
 	w.scanners["naabu"] = scanner.NewNaabuScanner()
+	w.scanners["gogo"] = scanner.NewGogoScanner()
 	w.scanners["subfinder"] = scanner.NewSubfinderScanner()
 	w.scanners["subdomain_bruteforce"] = scanner.NewSubdomainBruteforceScanner()
 	w.scanners["fingerprint"] = scanner.NewFingerprintScanner()
@@ -1631,6 +1635,57 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			if masscanResult != nil && len(masscanResult.Assets) > 0 {
 				openPorts = masscanResult.Assets
 				w.taskLog(task.TaskId, LevelInfo, "Found %d open ports", len(openPorts))
+			}
+		case "gogo":
+			w.taskLog(task.TaskId, LevelInfo, "Port scan: Gogo")
+			gogoScanner, ok := w.scanners["gogo"]
+			if !ok {
+				w.taskLog(task.TaskId, LevelError, "Gogo scanner not found, please register it first")
+				break
+			}
+
+			// 加载 Gogo 配置
+			if w.gogoConfig == nil {
+				gogoConfigResp, err := w.httpClient.GetGogoConfig(ctx)
+				if err != nil {
+					w.taskLog(task.TaskId, LevelWarn, "Failed to get gogo config: %v, using default", err)
+				} else if gogoConfigResp != nil && gogoConfigResp.Success {
+					w.gogoConfig = &scanner.CyberhubConfig{
+						URL: gogoConfigResp.Data.URL,
+						Key: gogoConfigResp.Data.Key,
+					}
+					w.taskLog(task.TaskId, LevelInfo, "Gogo config loaded: URL=%s", w.gogoConfig.URL)
+				}
+			}
+
+			gogoResult, err := gogoScanner.Scan(portCtx, &scanner.ScanConfig{
+				Target:         target,
+				Options:        config.PortScan,
+				WorkspaceId:    task.WorkspaceId,
+				MainTaskId:     task.MainTaskId,
+				TaskLogger:     taskLogger,
+				OnProgress:     onProgress,
+				CyberhubConfig: w.gogoConfig,
+			})
+			// 检查是否被停止或超时
+			if portCtx.Err() == context.DeadlineExceeded {
+				w.taskLog(task.TaskId, LevelWarn, "Port scan timeout, continuing with partial results")
+			} else if ctx.Err() != nil {
+				portCancel()
+				w.taskLog(task.TaskId, LevelInfo, "Task stopped")
+				return
+			}
+			if err != nil {
+				w.taskLog(task.TaskId, LevelError, "Gogo error: %v", err)
+			}
+			if gogoResult != nil && len(gogoResult.Assets) > 0 {
+				openPorts = gogoResult.Assets
+				w.taskLog(task.TaskId, LevelInfo, "Found %d open ports", len(openPorts))
+			}
+			// 保存 gogo 发现的漏洞
+			if gogoResult != nil && len(gogoResult.Vulnerabilities) > 0 {
+				w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, gogoResult.Vulnerabilities)
+				w.taskLog(task.TaskId, LevelInfo, "Gogo found %d vulnerabilities", len(gogoResult.Vulnerabilities))
 			}
 		default: // naabu
 			w.taskLog(task.TaskId, LevelInfo, "Port scan: Naabu")

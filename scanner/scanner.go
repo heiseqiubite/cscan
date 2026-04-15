@@ -43,6 +43,14 @@ type ScanConfig struct {
 	OnProgress func(progress int, message string) `json:"-"`
 	// OnAssetUpdated 局部资产完成更新时的回调事件（用于流式结果更新）
 	OnAssetUpdated func(asset *Asset) `json:"-"`
+	// CyberhubConfig Cyberhub 配置（用于 Gogo 等需要从外网下载资源的扫描器）
+	CyberhubConfig *CyberhubConfig `json:"-"`
+}
+
+// CyberhubConfig Cyberhub 配置
+type CyberhubConfig struct {
+	URL string
+	Key string
 }
 
 // GetTypedOptions 从 ScanConfig 中提取类型安全的选项
