@@ -80,13 +80,9 @@ func (s *GogoScanner) ensureInit() error {
 		return nil
 	}
 
-	// 默认 Cyberhub 配置
+	// Cyberhub 配置（从 API 获取或通过配置文件设置）
 	cyberhubURL := s.cyberhubURL
 	cyberhubKey := s.cyberhubKey
-	if cyberhubURL == "" {
-		cyberhubURL = "http://103.74.192.77:59080/"
-		cyberhubKey = "ch_4042fa70a808f00bb3c19956dda17171e53a701ce094ad4efd944ae0824dd4d4"
-	}
 
 	// 加载指纹库
 	fingersConfig := fingers.NewConfig()
