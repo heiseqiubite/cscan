@@ -126,6 +126,14 @@ func (l *DomainLogic) DomainList(req *types.DomainListReq, workspaceId string) (
 						existing.IPs = append(existing.IPs, ipv4.IPName)
 					}
 				}
+				// 更新时间取最新
+				if assetUpdate := asset.UpdateTime.Local().Format("2006-01-02 15:04:05"); assetUpdate > existing.UpdateTime {
+					existing.UpdateTime = assetUpdate
+				}
+				// 创建时间取最早
+				if assetCreate := asset.CreateTime.Local().Format("2006-01-02 15:04:05"); existing.CreateTime == "" || assetCreate < existing.CreateTime {
+					existing.CreateTime = assetCreate
+				}
 			} else {
 				// 创建新的域名记录
 				rootDomain := common.GetRootDomain(domain)
@@ -156,6 +164,7 @@ func (l *DomainLogic) DomainList(req *types.DomainListReq, workspaceId string) (
 					OrgName:    orgMap[asset.OrgId],
 					IsNew:      asset.IsNewAsset,
 					CreateTime: asset.CreateTime.Local().Format("2006-01-02 15:04:05"),
+					UpdateTime: asset.UpdateTime.Local().Format("2006-01-02 15:04:05"),
 				}
 			}
 		}

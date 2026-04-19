@@ -96,6 +96,7 @@ func (l *PortListLogic) PortList(req *types.PortListReq) (*types.PortListResp, e
 				Hosts:      r.Hosts,
 				Services:   services,
 				OrgName:    orgName,
+				CreateTime: r.CreateTime.Local().Format("2006-01-02 15:04:05"),
 				UpdateTime: r.UpdateTime.Local().Format("2006-01-02 15:04:05"),
 			}
 

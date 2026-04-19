@@ -188,9 +188,6 @@ func (l *MainTaskListLogic) MainTaskList(req *types.MainTaskListReq, workspaceId
 		subTaskDone := t.SubTaskDone
 		status := t.Status
 
-		// DEBUG: 打印从数据库读取的原始状态
-		fmt.Printf("[TaskList] task=%s, dbStatus='%s', progress=%d, subTaskDone=%d\n", t.TaskId, t.Status, t.Progress, t.SubTaskDone)
-
 		// 如果状态为空，根据进度推断状态（兼容旧数据）
 		if status == "" {
 			if progress >= 100 || (t.SubTaskCount > 0 && subTaskDone >= t.SubTaskCount) {
@@ -751,11 +748,8 @@ func NewMainTaskStartLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Mai
 }
 
 func (l *MainTaskStartLogic) MainTaskStart(req *types.MainTaskControlReq, workspaceId string) (resp *types.BaseResp, err error) {
-	fmt.Printf("[MainTaskStart] ========== START ==========\n")
-	fmt.Printf("[MainTaskStart] id=%s, reqWorkspaceId='%s', headerWorkspaceId='%s'\n",
-		req.Id, req.WorkspaceId, workspaceId)
-	l.Logger.Infof("MainTaskStart: received request, id=%s, reqWorkspaceId='%s', headerWorkspaceId='%s'",
-		req.Id, req.WorkspaceId, workspaceId)
+	l.Logger.Infof("[MainTaskStart] ========== START ==========")
+	l.Logger.Infof("[MainTaskStart] id=%s, reqWorkspaceId='%s', headerWorkspaceId='%s'", req.Id, req.WorkspaceId, workspaceId)
 
 	// 优先使用请求中的 workspaceId
 	wsId := req.WorkspaceId
@@ -796,8 +790,7 @@ func (l *MainTaskStartLogic) MainTaskStart(req *types.MainTaskControlReq, worksp
 		}
 	}
 
-	fmt.Printf("[MainTaskStart] using workspaceId='%s'\n", wsId)
-	l.Logger.Infof("MainTaskStart: using workspaceId='%s'", wsId)
+	l.Logger.Infof("[MainTaskStart] using workspaceId='%s'", wsId)
 
 	l.Logger.Infof("MainTaskStart: found task, id=%s, taskId=%s, currentStatus='%s', workspaceId=%s", req.Id, task.TaskId, task.Status, wsId)
 
