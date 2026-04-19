@@ -329,6 +329,7 @@ type Site struct {
 	Location   string   `json:"location"`
 	OrgId      string   `json:"orgId,omitempty"`
 	OrgName    string   `json:"orgName,omitempty"`
+	CreateTime string   `json:"createTime"`
 	UpdateTime string   `json:"updateTime"`
 	HttpHeader string   `json:"httpHeader,omitempty"`
 	IconHash   string   `json:"iconHash,omitempty"`
@@ -381,6 +382,7 @@ type Domain struct {
 	OrgName    string   `json:"orgName,omitempty"`
 	IsNew      bool     `json:"isNew"`
 	CreateTime string   `json:"createTime"`
+	UpdateTime string   `json:"updateTime"`
 }
 
 type DomainListResp struct {
@@ -563,6 +565,7 @@ type IPAsset struct {
 	DomainCount int        `json:"domainCount"`
 	OrgId       string     `json:"orgId,omitempty"`
 	OrgName     string     `json:"orgName,omitempty"`
+	CreateTime  string     `json:"createTime"`
 	UpdateTime  string     `json:"updateTime"`
 	IsNew       bool       `json:"isNew"`
 }
@@ -728,6 +731,7 @@ type Vul struct {
 	VulName    string   `json:"vulName,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
 	CreateTime string   `json:"createTime"`
+	UpdateTime string   `json:"updateTime"`
 	// 新增字段 - 时间追踪
 	FirstSeenTime string `json:"firstSeenTime,omitempty"`
 	LastSeenTime  string `json:"lastSeenTime,omitempty"`
@@ -758,6 +762,7 @@ type VulDetail struct {
 	VulName    string   `json:"vulName,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
 	CreateTime string   `json:"createTime"`
+	UpdateTime string   `json:"updateTime"`
 	// 知识库信息
 	CvssScore   float64  `json:"cvssScore,omitempty"`
 	CveId       string   `json:"cveId,omitempty"`
@@ -2603,6 +2608,7 @@ type AppItem struct {
 	Assets     []string `json:"assets"`
 	OrgName    string   `json:"orgName"`
 	CreateTime string   `json:"createTime"`
+	UpdateTime string   `json:"updateTime"`
 }
 
 type AppListResp struct {
@@ -2683,6 +2689,7 @@ type PortListItem struct {
 	Hosts      []string `json:"hosts"`
 	Services   []string `json:"services"`
 	OrgName    string   `json:"orgName"`
+	CreateTime string   `json:"createTime"`
 	UpdateTime string   `json:"updateTime"`
 }
 

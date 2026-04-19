@@ -980,6 +980,7 @@ type PortListAggregateResult struct {
 	AssetCount int       `bson:"assetCount"`
 	Hosts      []string  `bson:"hosts"`
 	Services   []string  `bson:"services"`
+	CreateTime time.Time `bson:"createTime"`
 	UpdateTime time.Time `bson:"updateTime"`
 }
 
@@ -1002,6 +1003,7 @@ func (m *AssetModel) AggregatePortList(ctx context.Context, filter bson.M, skip,
 			{Key: "assetCount", Value: bson.D{{Key: "$sum", Value: 1}}},
 			{Key: "hosts", Value: bson.D{{Key: "$addToSet", Value: "$host"}}},
 			{Key: "services", Value: bson.D{{Key: "$addToSet", Value: "$service"}}},
+			{Key: "createTime", Value: bson.D{{Key: "$min", Value: "$create_time"}}},
 			{Key: "updateTime", Value: bson.D{{Key: "$max", Value: "$update_time"}}},
 		}}},
 	}
