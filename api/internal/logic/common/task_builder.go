@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"time"
 
 	"cscan/api/internal/svc"
@@ -134,7 +135,7 @@ func (b *TaskBuilder) prewriteInitialAssets(workspaceId string, task *model.Main
 
 	assetModel := b.svcCtx.GetAssetModel(workspaceId)
 	orgId, _ := taskConfig["orgId"].(string)
-	assets := collectInitialAssets(batches)
+	assets := collectInitialAssets(batches, taskConfig)
 
 	for _, asset := range assets {
 		if err := b.upsertInitialAsset(assetModel, task, asset, orgId); err != nil {
@@ -156,12 +157,14 @@ func isPortScanEnabled(taskConfig map[string]interface{}) bool {
 	return false
 }
 
-func collectInitialAssets(batches []string) []*scanner.Asset {
+func collectInitialAssets(batches []string, taskConfig map[string]interface{}) []*scanner.Asset {
 	// Scheme 2: Pass a generator that avoids synchronous DNS lookups during API request
-	return collectInitialAssetsWithGenerator(batches, scanner.GenerateAssetsFromTargetsWithoutDNS)
+	// 当端口扫描启用时，跳过纯 IP 目标（由端口扫描器发现实际开放的端口）
+	skipIPTargets := isPortScanEnabled(taskConfig)
+	return collectInitialAssetsWithGenerator(batches, scanner.GenerateAssetsFromTargetsWithoutDNS, skipIPTargets)
 }
 
-func collectInitialAssetsWithGenerator(batches []string, generator func(string) []*scanner.Asset) []*scanner.Asset {
+func collectInitialAssetsWithGenerator(batches []string, generator func(string) []*scanner.Asset, skipIPTargets bool) []*scanner.Asset {
 	seen := make(map[string]struct{})
 	collected := make([]*scanner.Asset, 0)
 
@@ -169,6 +172,12 @@ func collectInitialAssetsWithGenerator(batches []string, generator func(string) 
 		assets := generator(batch)
 		for _, asset := range assets {
 			if asset == nil || asset.Host == "" {
+				continue
+			}
+
+			// 跳过纯 IP 目标（当端口扫描启用时）
+			// 这些 IP 由端口扫描器发现实际开放的端口，不应预生成
+			if skipIPTargets && isIPAddress(asset.Host) {
 				continue
 			}
 
@@ -363,4 +372,9 @@ func (b *TaskBuilder) extractWorkers(config map[string]interface{}) []string {
 		}
 	}
 	return workers
+}
+
+// isIPAddress 判断是否为 IP 地址
+func isIPAddress(host string) bool {
+	return net.ParseIP(host) != nil
 }

@@ -99,7 +99,7 @@ func (p *TargetParser) ParseMultiple(input string) []*Target {
 	return targets
 }
 
-// ExpandAll 展开所有目标为单个IP/域名列表
+// ExpandAll 展开所有目标为单个IP/域名列表（会展开 CIDR）
 func (p *TargetParser) ExpandAll(input string) []string {
 	targets := p.ParseMultiple(input)
 	var result []string
@@ -111,6 +111,55 @@ func (p *TargetParser) ExpandAll(input string) []string {
 			if !seen[h] {
 				seen[h] = true
 				result = append(result, h)
+			}
+		}
+	}
+	return result
+}
+
+// ExpandAllSmart 智能展开目标（CIDR/IP范围保持原子性）
+// - CIDR (10.66.70.1/24) → 作为整体，不展开
+// - IP范围 (192.168.1.1-100) → 作为整体，不展开
+// - 域名 (example.com) → 作为整体
+// - 单个IP (192.168.1.1) → 保持单个IP
+// 用于端口扫描等可以直接处理网段的扫描器
+func (p *TargetParser) ExpandAllSmart(input string) []string {
+	targets := p.ParseMultiple(input)
+	var result []string
+	seen := make(map[string]bool)
+
+	for _, t := range targets {
+		// CIDR 和 IP 范围保持原子性，直接使用原始输入
+		if t.Type == TargetTypeCIDR || t.Type == TargetTypeRange {
+			if !seen[t.Raw] {
+				seen[t.Raw] = true
+				result = append(result, t.Raw)
+			}
+			continue
+		}
+
+		// URL 格式使用带端口的 host:port
+		if t.Type == TargetTypeURL {
+			host := t.Host
+			if t.Port > 0 {
+				host = fmt.Sprintf("%s:%d", host, t.Port)
+			}
+			if !seen[host] {
+				seen[host] = true
+				result = append(result, host)
+			}
+			continue
+		}
+
+		// 单个 IP 或域名
+		if t.Host != "" {
+			host := t.Host
+			if t.Port > 0 {
+				host = fmt.Sprintf("%s:%d", host, t.Port)
+			}
+			if !seen[host] {
+				seen[host] = true
+				result = append(result, host)
 			}
 		}
 	}
@@ -387,4 +436,11 @@ func ParsePortsNew(portStr string) []int {
 func GetCategoryNew(host string) string {
 	parser := NewTargetParser()
 	return string(parser.detectHostType(host))
+}
+
+// ParseTargetsSmart 智能解析目标（CIDR 保持原子性）
+// 用于端口扫描等可直接处理网段的扫描器
+func ParseTargetsSmart(target string) []string {
+	parser := NewTargetParser()
+	return parser.ExpandAllSmart(target)
 }

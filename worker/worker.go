@@ -50,9 +50,6 @@ type Worker struct {
 	wg         sync.WaitGroup
 	mu         sync.Mutex
 
-	// Gogo 配置缓存
-	gogoConfig *scanner.CyberhubConfig
-
 	taskStarted  int
 	taskExecuted int
 	isRunning    bool
@@ -311,6 +308,7 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 
 	// 注册扫描器
 	w.registerScanners()
+	w.initializeScanners()
 
 	// 初始化 IP 地理位置服务
 	w.initGeolocation()
@@ -457,6 +455,58 @@ func (w *Worker) GetScannerConfigRecommendation() *ScannerConfigRecommendation {
 	return nil
 }
 
+func (w *Worker) initializeScanner(ctx context.Context, name string, s scanner.Scanner, config *scanner.BootstrapConfig) error {
+	bootstrapper, ok := s.(scanner.Bootstrapper)
+	if !ok {
+		return nil
+	}
+	return bootstrapper.Bootstrap(ctx, config)
+}
+
+func (w *Worker) initializeScanners() {
+	for name, s := range w.scanners {
+		cfg, err := w.buildScannerBootstrapConfig(name)
+		if err != nil {
+			w.logger.Warn("Failed to build %s bootstrap config: %v", name, err)
+			continue
+		}
+		if err := w.initializeScanner(w.ctx, name, s, cfg); err != nil {
+			w.logger.Warn("Failed to bootstrap %s scanner: %v", name, err)
+		}
+	}
+}
+
+func (w *Worker) buildScannerBootstrapConfig(name string) (*scanner.BootstrapConfig, error) {
+	cfg := &scanner.BootstrapConfig{CacheDir: w.scannerCacheDir(name)}
+	if name != "gogo" {
+		return cfg, nil
+	}
+
+	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
+	defer cancel()
+
+	gogoConfigResp, err := w.httpClient.GetGogoConfig(ctx)
+	if err != nil {
+		return cfg, err
+	}
+	if gogoConfigResp == nil || !gogoConfigResp.Success {
+		return cfg, fmt.Errorf("invalid gogo config response")
+	}
+	cfg.CyberhubConfig = &scanner.CyberhubConfig{
+		URL: gogoConfigResp.Data.URL,
+		Key: gogoConfigResp.Data.Key,
+	}
+	return cfg, nil
+}
+
+func (w *Worker) scannerCacheDir(name string) string {
+	baseDir, err := os.UserCacheDir()
+	if err != nil || baseDir == "" {
+		baseDir = os.TempDir()
+	}
+	return filepath.Join(baseDir, "cscan", "scanners", name)
+}
+
 // registerScanners 注册扫描器
 func (w *Worker) registerScanners() {
 	w.scanners["portscan"] = scanner.NewPortScanner()
@@ -471,6 +521,29 @@ func (w *Worker) registerScanners() {
 	w.scanners["nuclei"] = scanner.NewNucleiScanner()
 	w.scanners["urlfinder"] = scanner.NewURLFinderScanner()
 	w.scanners["ffuf"] = scanner.NewFFufScanner()
+}
+
+func (w *Worker) executeGogoPortScan(
+	ctx context.Context,
+	task *scheduler.TaskInfo,
+	target string,
+	portConfig *scheduler.PortScanConfig,
+	taskLogger func(level, format string, args ...interface{}),
+	onProgress func(progress int, message string),
+) (*scanner.ScanResult, error) {
+	gogoScanner, ok := w.scanners["gogo"]
+	if !ok {
+		return nil, fmt.Errorf("gogo scanner not registered")
+	}
+
+	return gogoScanner.Scan(ctx, &scanner.ScanConfig{
+		Target:      target,
+		Options:     portConfig,
+		WorkspaceId: task.WorkspaceId,
+		MainTaskId:  task.MainTaskId,
+		TaskLogger:  taskLogger,
+		OnProgress:  onProgress,
+	})
 }
 
 // Start 启动Worker
@@ -1582,8 +1655,8 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 		if portConcurrency <= 0 {
 			portConcurrency = 1
 		}
-		// 粗略估算目标数（按换行分割）
-		portTargetCount := len(strings.Split(strings.TrimSpace(target), "\n"))
+		// 估算目标数：使用 ExpandAll 展开 CIDR/IP段 获取实际 IP 数量
+		portTargetCount := len(scanner.ParseTargetsNew(target))
 		portScanTimeout := singleTimeout * portTargetCount / portConcurrency
 		if portScanTimeout < 60 {
 			portScanTimeout = 60
@@ -1638,35 +1711,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			}
 		case "gogo":
 			w.taskLog(task.TaskId, LevelInfo, "Port scan: Gogo")
-			gogoScanner, ok := w.scanners["gogo"]
-			if !ok {
-				w.taskLog(task.TaskId, LevelError, "Gogo scanner not found, please register it first")
-				break
-			}
-
-			// 加载 Gogo 配置
-			if w.gogoConfig == nil {
-				gogoConfigResp, err := w.httpClient.GetGogoConfig(ctx)
-				if err != nil {
-					w.taskLog(task.TaskId, LevelWarn, "Failed to get gogo config: %v, using default", err)
-				} else if gogoConfigResp != nil && gogoConfigResp.Success {
-					w.gogoConfig = &scanner.CyberhubConfig{
-						URL: gogoConfigResp.Data.URL,
-						Key: gogoConfigResp.Data.Key,
-					}
-					w.taskLog(task.TaskId, LevelInfo, "Gogo config loaded: URL=%s", w.gogoConfig.URL)
-				}
-			}
-
-			gogoResult, err := gogoScanner.Scan(portCtx, &scanner.ScanConfig{
-				Target:         target,
-				Options:        config.PortScan,
-				WorkspaceId:    task.WorkspaceId,
-				MainTaskId:     task.MainTaskId,
-				TaskLogger:     taskLogger,
-				OnProgress:     onProgress,
-				CyberhubConfig: w.gogoConfig,
-			})
+			gogoResult, err := w.executeGogoPortScan(portCtx, task, target, config.PortScan, taskLogger, onProgress)
 			// 检查是否被停止或超时
 			if portCtx.Err() == context.DeadlineExceeded {
 				w.taskLog(task.TaskId, LevelWarn, "Port scan timeout, continuing with partial results")
@@ -1684,6 +1729,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			}
 			// 保存 gogo 发现的漏洞
 			if gogoResult != nil && len(gogoResult.Vulnerabilities) > 0 {
+				allVuls = append(allVuls, gogoResult.Vulnerabilities...)
 				w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, gogoResult.Vulnerabilities)
 				w.taskLog(task.TaskId, LevelInfo, "Gogo found %d vulnerabilities", len(gogoResult.Vulnerabilities))
 			}

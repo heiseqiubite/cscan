@@ -21,6 +21,17 @@ type Scanner interface {
 	Scan(ctx context.Context, config *ScanConfig) (*ScanResult, error)
 }
 
+// BootstrapConfig 扫描器启动配置
+type BootstrapConfig struct {
+	CacheDir       string
+	CyberhubConfig *CyberhubConfig
+}
+
+// Bootstrapper 支持启动预热的扫描器接口
+type Bootstrapper interface {
+	Bootstrap(ctx context.Context, config *BootstrapConfig) error
+}
+
 // TypedScanner 类型安全的扫描器接口（泛型版本）
 // 用于需要强类型选项的扫描器实现
 type TypedScanner[T ScannerOptions] interface {
@@ -74,6 +85,7 @@ type ScanResult struct {
 	MainTaskId      string           `json:"mainTaskId"`
 	Assets          []*Asset         `json:"assets"`
 	Vulnerabilities []*Vulnerability `json:"vulnerabilities"`
+	AliveHosts      []string         `json:"aliveHosts"` // Ping 模式返回的存活 IP 列表
 }
 
 // Asset 资产

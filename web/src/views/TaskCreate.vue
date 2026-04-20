@@ -204,11 +204,53 @@
                     </el-form-item>
                   </el-col>
                 </el-row>
-                <el-form-item :label="$t('task.vulnDetect')">
-                  <el-select v-model="form.gogoExploit" style="width:100%">
-                    <el-option label="关闭" value="none" />
-                    <el-option label="自动" value="auto" />
-                  </el-select>
+                <el-row :gutter="20">
+                  <el-col :span="12">
+                    <el-form-item :label="$t('task.vulnDetect')">
+                      <el-select v-model="form.gogoExploit" style="width:100%">
+                        <el-option label="关闭" value="none" />
+                        <el-option label="自动" value="auto" />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="'扫描模式'">
+                      <el-select v-model="form.gogoMod" style="width:100%">
+                        <el-option label="默认" value="default" />
+                        <el-option label="s - 综合" value="s" />
+                        <el-option label="ss - 深度" value="ss" />
+                        <el-option label="sc - 快速" value="sc" />
+                        <el-option label="sb - 爆破" value="sb" />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-row :gutter="20">
+                  <el-col :span="12">
+                    <el-form-item :label="'TCP超时(秒)'">
+                      <el-input-number v-model="form.gogoDelay" :min="1" :max="30" style="width:100%" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item :label="'HTTPS超时(秒)'">
+                      <el-input-number v-model="form.gogoHttpsDelay" :min="1" :max="30" style="width:100%" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-row :gutter="20">
+                  <el-col :span="12">
+                    <el-form-item label="'存活检测'">
+                      <el-switch v-model="form.gogoPing" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="'仅探测'">
+                      <el-switch v-model="form.gogoNoScan" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item :label="'排除目标'">
+                  <el-input v-model="form.gogoExclude" placeholder="排除的 IP/CIDR，多个用逗号分隔" />
                 </el-form-item>
               </template>
               <el-form-item v-if="form.portscanTool !== 'gogo'" :label="$t('task.portRange')">
@@ -1128,7 +1170,13 @@ const form = reactive({
   gogoPorts: '80,443,8080',
   gogoThreads: 500,
   gogoVersionLevel: 1,
-  gogoExploit: 'none'
+  gogoExploit: 'none',
+  gogoMod: 'default',
+  gogoDelay: 2,
+  gogoHttpsDelay: 2,
+  gogoPing: false,
+  gogoNoScan: false,
+  gogoExclude: ''
 })
 
 // 判断是否有前序扫描阶段启用（用于控制强制扫描开关的显隐）
@@ -1323,7 +1371,13 @@ function applyConfig(config) {
     gogoPorts: config.portscan?.gogo?.ports || '80,443,8080',
     gogoThreads: config.portscan?.gogo?.threads || 500,
     gogoVersionLevel: config.portscan?.gogo?.versionLevel ?? 1,
-    gogoExploit: config.portscan?.gogo?.exploit || 'none'
+    gogoExploit: config.portscan?.gogo?.exploit || 'none',
+    gogoMod: config.portscan?.gogo?.mod || 'default',
+    gogoDelay: config.portscan?.gogo?.delay || 2,
+    gogoHttpsDelay: config.portscan?.gogo?.httpsDelay || 2,
+    gogoPing: config.portscan?.gogo?.ping ?? false,
+    gogoNoScan: config.portscan?.gogo?.noScan ?? false,
+    gogoExclude: config.portscan?.gogo?.exclude || ''
   })
 
   // 恢复选择的模板
@@ -1417,7 +1471,13 @@ watch(
     gogoPorts: form.gogoPorts,
     gogoThreads: form.gogoThreads,
     gogoVersionLevel: form.gogoVersionLevel,
-    gogoExploit: form.gogoExploit
+    gogoExploit: form.gogoExploit,
+    gogoMod: form.gogoMod,
+    gogoDelay: form.gogoDelay,
+    gogoHttpsDelay: form.gogoHttpsDelay,
+    gogoPing: form.gogoPing,
+    gogoNoScan: form.gogoNoScan,
+    gogoExclude: form.gogoExclude
   }),
   () => {
     if (!isEdit.value) {
@@ -1561,7 +1621,13 @@ function buildConfig() {
       ports: form.gogoPorts,
       threads: form.gogoThreads,
       versionLevel: form.gogoVersionLevel,
-      exploit: form.gogoExploit
+      exploit: form.gogoExploit,
+      mod: form.gogoMod,
+      delay: form.gogoDelay,
+      httpsDelay: form.gogoHttpsDelay,
+      ping: form.gogoPing,
+      noScan: form.gogoNoScan,
+      exclude: form.gogoExclude
     }
   }
 

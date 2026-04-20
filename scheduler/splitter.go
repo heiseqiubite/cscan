@@ -223,10 +223,11 @@ func (s *TaskSplitter) estimateExecutionTime(targetCount int, taskConfig map[str
 	return int(float64(targetCount*baseTimePerTarget) * multiplier)
 }
 
-// parseAllTargets 解析所有目标（展开CIDR和IP范围）
+// parseAllTargets 解析所有目标（智能处理 CIDR）
+// CIDR 和 IP 范围保持为原子单元，由端口扫描器直接处理
 func (s *TaskSplitter) parseAllTargets(target string) ([]string, error) {
 	parser := scanner.NewTargetParser()
-	targets := parser.ExpandAll(target)
+	targets := parser.ExpandAllSmart(target)
 	if len(targets) == 0 {
 		return []string{}, fmt.Errorf("没有在此输入中解析到有效的扫描目标或IP")
 	}

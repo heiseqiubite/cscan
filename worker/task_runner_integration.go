@@ -323,6 +323,118 @@ type PortScanExecutor struct {
 	worker *Worker
 }
 
+type portDiscoverySpec struct {
+	tool  string
+	label string
+}
+
+func (e *PortScanExecutor) buildAssetsFromExplicitPorts(targets []*scanner.ParsedTarget) []*scanner.Asset {
+	assets := make([]*scanner.Asset, 0, len(targets))
+	for _, pt := range targets {
+		asset := &scanner.Asset{
+			Authority: pt.Raw,
+			Host:      pt.Host,
+			Port:      pt.Port,
+			Category:  scanner.GetCategoryNew(pt.Host),
+			Source:    "user_input",
+			IsHTTP:    scanner.IsHTTPService("", pt.Port),
+		}
+		if pt.Protocol == "https" {
+			asset.Service = "https"
+			asset.IsHTTP = true
+		} else if pt.Protocol == "http" {
+			asset.Service = "http"
+			asset.IsHTTP = true
+		}
+		assets = append(assets, asset)
+	}
+	return assets
+}
+
+func (e *PortScanExecutor) calculatePortScanTimeout(config *scheduler.PortScanConfig, targetCount int) int {
+	singleTimeout := config.Timeout
+	if singleTimeout <= 0 {
+		singleTimeout = 5
+	}
+	concurrency := config.Workers
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	portScanTimeout := singleTimeout * targetCount / concurrency
+	if portScanTimeout < 60 {
+		return 60
+	}
+	return portScanTimeout
+}
+
+func (e *PortScanExecutor) resolvePortDiscoverySpec(config *scheduler.PortScanConfig) (string, string) {
+	spec := portDiscoverySpec{
+		tool:  "naabu",
+		label: "Naabu",
+	}
+
+	if config == nil || config.Tool == "" {
+		return spec.tool, spec.label
+	}
+
+	spec.tool = config.Tool
+	switch config.Tool {
+	case "gogo":
+		spec.label = "Gogo"
+	case "masscan":
+		spec.label = "Masscan"
+	default:
+		spec.label = "Naabu"
+	}
+
+	return spec.tool, spec.label
+}
+
+func (e *PortScanExecutor) executePortDiscovery(
+	ctx context.Context,
+	task *scheduler.TaskInfo,
+	tool string,
+	target string,
+	config *scheduler.PortScanConfig,
+	taskLogger func(level, format string, args ...interface{}),
+	onProgress func(progress int, message string),
+	saveVulnerabilities func([]*scanner.Vulnerability),
+) ([]*scanner.Asset, error) {
+	w := e.worker
+
+	if tool == "gogo" {
+		result, err := w.executeGogoPortScan(ctx, task, target, config, taskLogger, onProgress)
+		if result == nil {
+			return nil, err
+		}
+		if len(result.Vulnerabilities) > 0 && saveVulnerabilities != nil {
+			saveVulnerabilities(result.Vulnerabilities)
+		}
+		return result.Assets, err
+	}
+
+	scannerName := tool
+	if scannerName == "" {
+		scannerName = "naabu"
+	}
+
+	s, ok := w.scanners[scannerName]
+	if !ok {
+		return nil, fmt.Errorf("%s scanner not registered", scannerName)
+	}
+
+	result, err := s.Scan(ctx, &scanner.ScanConfig{
+		Target:     target,
+		Options:    config,
+		TaskLogger: taskLogger,
+		OnProgress: onProgress,
+	})
+	if result == nil {
+		return nil, err
+	}
+	return result.Assets, err
+}
+
 // NewPortScanExecutor 创建端口扫描执行器
 func NewPortScanExecutor(worker *Worker) *PortScanExecutor {
 	return &PortScanExecutor{worker: worker}
@@ -339,164 +451,69 @@ func (e *PortScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 	task := ctx.Task
 	config := ctx.Config.PortScan
 
-	// 解析目标，分离带端口和不带端口的目标
 	parseResult := scanner.ParseTargetsForPortScan(ctx.Target)
+	openPorts := e.buildAssetsFromExplicitPorts(parseResult.WithPort)
+	var gogoVulns []*scanner.Vulnerability
 
-	var openPorts []*scanner.Asset
-
-	// 1. 处理带端口的目标（直接创建资产，跳过端口扫描）
 	if len(parseResult.WithPort) > 0 {
 		w.taskLog(task.TaskId, LevelInfo, "Port scan: %d targets with explicit port (skip discovery)", len(parseResult.WithPort))
-		for _, pt := range parseResult.WithPort {
-			asset := &scanner.Asset{
-				Authority: pt.Raw,
-				Host:      pt.Host,
-				Port:      pt.Port,
-				Category:  scanner.GetCategoryNew(pt.Host),
-				Source:    "user_input",
-				IsHTTP:    scanner.IsHTTPService("", pt.Port),
-			}
-			// 如果有协议，设置服务类型
-			if pt.Protocol == "https" {
-				asset.Service = "https"
-				asset.IsHTTP = true
-			} else if pt.Protocol == "http" {
-				asset.Service = "http"
-				asset.IsHTTP = true
-			}
-			openPorts = append(openPorts, asset)
-		}
 	}
 
-	// 2. 处理不带端口的目标（执行端口扫描）
 	if len(parseResult.WithoutPort) > 0 {
-		// 使用 Worker 并发数覆盖 Naabu Workers
 		if config.Workers <= 0 || config.Workers > w.config.Concurrency {
 			config.Workers = w.config.Concurrency
 		}
 
-		// 按单目标超时计算总超时：单目标超时 × 目标数 / 并发数
+		portScanTimeout := e.calculatePortScanTimeout(config, len(parseResult.WithoutPort))
 		singleTimeout := config.Timeout
 		if singleTimeout <= 0 {
 			singleTimeout = 5
 		}
-		targetCount := len(parseResult.WithoutPort)
 		concurrency := config.Workers
 		if concurrency <= 0 {
 			concurrency = 1
 		}
-		portScanTimeout := singleTimeout * targetCount / concurrency
-		if portScanTimeout < 60 {
-			portScanTimeout = 60
-		}
 		w.taskLog(task.TaskId, LevelInfo, "Port scan: timeout=%ds (single=%ds, targets=%d, concurrency=%d)",
-			portScanTimeout, singleTimeout, targetCount, concurrency)
+			portScanTimeout, singleTimeout, len(parseResult.WithoutPort), concurrency)
+
 		portCtx, portCancel := context.WithTimeout(ctx.Ctx, time.Duration(portScanTimeout)*time.Second)
 		defer portCancel()
 
-		// 选择端口发现工具
-		portDiscoveryTool := "naabu"
-		if config.Tool != "" {
-			portDiscoveryTool = config.Tool
-		}
+		toolName, toolLabel := e.resolvePortDiscoverySpec(config)
 
-		// 创建任务日志回调
 		taskLogger := func(level, format string, args ...interface{}) {
 			w.taskLog(task.TaskId, level, format, args...)
 		}
-
-		// 创建进度回调
 		onProgress := func(progress int, message string) {
 			w.updateTaskProgress(ctx.Ctx, task.TaskId, progress, message)
 		}
-
-		// 将不带端口的目标重新组合为字符串
 		targetStr := strings.Join(parseResult.WithoutPort, "\n")
 
-		switch portDiscoveryTool {
-		case "masscan":
-			w.taskLog(task.TaskId, LevelInfo, "Port scan: Masscan (%d targets)", len(parseResult.WithoutPort))
-			if s, ok := w.scanners["masscan"]; ok {
-				result, err := s.Scan(portCtx, &scanner.ScanConfig{
-					Target:     targetStr,
-					Options:    config,
-					TaskLogger: taskLogger,
-					OnProgress: onProgress,
-				})
-				if err != nil {
-					w.taskLog(task.TaskId, LevelError, "Masscan error: %v", err)
-				}
-				if result != nil && len(result.Assets) > 0 {
-					openPorts = append(openPorts, result.Assets...)
-				}
-			}
-		case "gogo":
-			w.taskLog(task.TaskId, LevelInfo, "Port scan: Gogo (%d targets)", len(parseResult.WithoutPort))
-			if s, ok := w.scanners["gogo"]; ok {
-				// 加载 Gogo 配置
-				if w.gogoConfig == nil {
-					gogoConfigResp, err := w.httpClient.GetGogoConfig(ctx.Ctx)
-					if err != nil {
-						w.taskLog(task.TaskId, LevelWarn, "Failed to get gogo config: %v, using default", err)
-					} else if gogoConfigResp != nil && gogoConfigResp.Success {
-						w.gogoConfig = &scanner.CyberhubConfig{
-							URL: gogoConfigResp.Data.URL,
-							Key: gogoConfigResp.Data.Key,
-						}
-						w.taskLog(task.TaskId, LevelInfo, "Gogo config loaded: URL=%s", w.gogoConfig.URL)
-					}
-				}
-				result, err := s.Scan(portCtx, &scanner.ScanConfig{
-					Target:         targetStr,
-					Options:        config,
-					WorkspaceId:    task.WorkspaceId,
-					MainTaskId:     task.MainTaskId,
-					TaskLogger:     taskLogger,
-					OnProgress:     onProgress,
-					CyberhubConfig: w.gogoConfig,
-				})
-				if err != nil {
-					w.taskLog(task.TaskId, LevelError, "Gogo error: %v", err)
-				}
-				if result != nil && len(result.Assets) > 0 {
-					openPorts = append(openPorts, result.Assets...)
-				}
-				// 保存 gogo 发现的漏洞
-				if result != nil && len(result.Vulnerabilities) > 0 {
-					w.saveVulResult(ctx.Ctx, task.WorkspaceId, task.MainTaskId, result.Vulnerabilities)
-					w.taskLog(task.TaskId, LevelInfo, "Gogo found %d vulnerabilities", len(result.Vulnerabilities))
-				}
-			}
-		default:
-			w.taskLog(task.TaskId, LevelInfo, "Port scan: Naabu (%d targets)", len(parseResult.WithoutPort))
-			if s, ok := w.scanners["naabu"]; ok {
-				result, err := s.Scan(portCtx, &scanner.ScanConfig{
-					Target:     targetStr,
-					Options:    config,
-					TaskLogger: taskLogger,
-					OnProgress: onProgress,
-				})
-				if err != nil && err != scanner.ErrPortThresholdExceeded {
-					w.taskLog(task.TaskId, LevelError, "Naabu error: %v", err)
-				}
-				if result != nil && len(result.Assets) > 0 {
-					openPorts = append(openPorts, result.Assets...)
-				}
-			}
+		w.taskLog(task.TaskId, LevelInfo, "Port scan: %s (%d targets)", toolLabel, len(parseResult.WithoutPort))
+		assets, err := e.executePortDiscovery(portCtx, task, toolName, targetStr, config, taskLogger, onProgress, func(vulns []*scanner.Vulnerability) {
+			gogoVulns = append(gogoVulns, vulns...)
+			w.saveVulResult(ctx.Ctx, task.WorkspaceId, task.MainTaskId, vulns)
+			w.taskLog(task.TaskId, LevelInfo, "Gogo found %d vulnerabilities", len(vulns))
+		})
+		if toolName == "naabu" && err == scanner.ErrPortThresholdExceeded {
+			w.taskLog(task.TaskId, LevelWarn, "Some targets exceeded port threshold and were skipped")
+		}
+		if err != nil && !(toolName == "naabu" && err == scanner.ErrPortThresholdExceeded) {
+			w.taskLog(task.TaskId, LevelError, "%s error: %v", toolLabel, err)
+		}
+		if assets != nil && len(assets) > 0 {
+			openPorts = append(openPorts, assets...)
 		}
 	}
 
-	// 检查控制信号
 	if w.checkTaskControl(ctx.Ctx, task.TaskId) == "STOP" || ctx.Ctx.Err() != nil {
-		return &PhaseResult{Stopped: true, Assets: openPorts}, nil
+		return &PhaseResult{Stopped: true, Assets: openPorts, Vulnerabilities: gogoVulns}, nil
 	}
 
-	// 设置 IsHTTP 字段
 	for _, asset := range openPorts {
 		asset.IsHTTP = scanner.IsHTTPService(asset.Service, asset.Port)
 	}
 
-	// 保存结果
 	if len(openPorts) > 0 {
 		w.taskLog(task.TaskId, LevelInfo, "Port scan completed: %d assets", len(openPorts))
 		w.saveAssetResult(ctx.Ctx, task.WorkspaceId, task.MainTaskId, ctx.OrgId, openPorts)
@@ -504,7 +521,7 @@ func (e *PortScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 		w.taskLog(task.TaskId, LevelInfo, "No open ports found")
 	}
 
-	return &PhaseResult{Assets: openPorts}, nil
+	return &PhaseResult{Assets: openPorts, Vulnerabilities: gogoVulns}, nil
 }
 
 // FingerprintExecutor 指纹识别阶段执行器
