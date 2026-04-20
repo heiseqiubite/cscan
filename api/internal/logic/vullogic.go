@@ -133,6 +133,7 @@ func (l *VulListLogic) VulList(req *types.VulListReq, workspaceId string) (resp 
 			VulName:    v.VulName,
 			Tags:       v.Tags,
 			CreateTime: v.CreateTime.Local().Format("2006-01-02 15:04:05"),
+			UpdateTime: v.UpdateTime.Local().Format("2006-01-02 15:04:05"),
 			ScanCount:  v.ScanCount,
 		}
 		// 新增字段 - 时间追踪
@@ -339,6 +340,7 @@ func (l *VulDetailLogic) VulDetail(req *types.VulDetailReq, workspaceId string) 
 		VulName:    vul.VulName,
 		Tags:       vul.Tags,
 		CreateTime: vul.CreateTime.Local().Format("2006-01-02 15:04:05"),
+		UpdateTime: vul.UpdateTime.Local().Format("2006-01-02 15:04:05"),
 		// 知识库信息
 		CvssScore:   vul.CvssScore,
 		CveId:       vul.CveId,

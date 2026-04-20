@@ -178,6 +178,15 @@ func (l *IPLogic) IPList(req *types.IPListReq, workspaceId string) (*types.IPLis
 					if existing.Location == "" && location != "" {
 						existing.Location = location
 					}
+
+					// 更新时间取最新
+					if assetUpdate := asset.UpdateTime.Local().Format("2006-01-02 15:04:05"); assetUpdate > existing.UpdateTime {
+						existing.UpdateTime = assetUpdate
+					}
+					// 创建时间取最早
+					if assetCreate := asset.CreateTime.Local().Format("2006-01-02 15:04:05"); existing.CreateTime == "" || assetCreate < existing.CreateTime {
+						existing.CreateTime = assetCreate
+					}
 				} else {
 					// 创建新的IP记录
 					ports := []types.PortInfo{}
@@ -206,6 +215,7 @@ func (l *IPLogic) IPList(req *types.IPListReq, workspaceId string) (*types.IPLis
 						DomainCount: len(domains),
 						OrgId:       asset.OrgId,
 						OrgName:     orgMap[asset.OrgId],
+						CreateTime:  asset.CreateTime.Local().Format("2006-01-02 15:04:05"),
 						UpdateTime:  asset.UpdateTime.Local().Format("2006-01-02 15:04:05"),
 						IsNew:       asset.IsNewAsset,
 					}

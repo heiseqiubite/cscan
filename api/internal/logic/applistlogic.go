@@ -72,12 +72,15 @@ func (l *AppListLogic) AppList(req *types.AppListReq) (*types.AppListResp, error
 		}
 
 		assetNames := make([]string, 0, len(assets))
-		var createTime string
+		var createTime, updateTime string
 		orgName := ""
 		for _, asset := range assets {
 			assetNames = append(assetNames, asset.Host)
-			if createTime == "" {
-				createTime = asset.CreateTime.Format("2006-01-02 15:04:05")
+			if assetCreate := asset.CreateTime.Local().Format("2006-01-02 15:04:05"); createTime == "" || assetCreate < createTime {
+				createTime = assetCreate
+			}
+			if assetUpdate := asset.UpdateTime.Local().Format("2006-01-02 15:04:05"); assetUpdate > updateTime {
+				updateTime = assetUpdate
 			}
 			if orgName == "" {
 				orgName = orgMap[asset.OrgId]
@@ -91,6 +94,7 @@ func (l *AppListLogic) AppList(req *types.AppListReq) (*types.AppListResp, error
 			Assets:     assetNames,
 			OrgName:    orgName,
 			CreateTime: createTime,
+			UpdateTime: updateTime,
 		})
 	}
 
