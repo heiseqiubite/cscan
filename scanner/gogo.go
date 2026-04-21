@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,13 +14,11 @@ import (
 
 	"github.com/chainreactors/fingers/common"
 	"github.com/chainreactors/gogo/v2/pkg"
-	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/parsers"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	gogopkg "github.com/chainreactors/sdk/gogo"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	sdkpkg "github.com/chainreactors/sdk/pkg"
-	"github.com/chainreactors/sdk/pkg/cyberhub"
 	"github.com/zeromicro/go-zero/core/logx"
 
 	"cscan/pkg/utils"
@@ -182,34 +181,35 @@ func (s *GogoScanner) Bootstrap(ctx context.Context, config *BootstrapConfig) er
 		return fmt.Errorf("bootstrap config is required")
 	}
 
-	cache := gogoCachePaths(config.CacheDir)
-	if !cache.ready() {
-		if config.CyberhubConfig == nil || config.CyberhubConfig.URL == "" || config.CyberhubConfig.Key == "" {
-			return fmt.Errorf("gogo bootstrap requires cyberhub config or local cache")
+	// First: Try to fetch from API if GogoAPIEnabled is true
+	if config.GogoAPIEnabled && config.GogoAPIEndpoint != "" {
+		cache := gogoCachePaths()
+		err := s.initFromAPI(ctx, config, cache)
+		if err == nil {
+			return nil
 		}
-		if err := cache.ensureDir(); err != nil {
-			return err
-		}
-		if err := exportGogoCache(ctx, config.CyberhubConfig, cache); err != nil {
-			return err
-		}
+		// Log fallback and continue to local cache
+		logx.Infof("Gogo: API fetch failed, falling back to local cache: %v", err)
 	}
 
-	return s.initFromLocalCache(cache)
+	// Fallback: Try local cache files in current directory
+	cache := gogoCachePaths()
+	if cache.ready() {
+		return s.initFromLocalCache(cache)
+	}
+
+	return fmt.Errorf("gogo bootstrap failed: no API access and no local cache files (./fingers.yaml and ./pocs.yaml)")
 }
 
 type gogoCacheFiles struct {
-	root        string
 	fingersFile string
 	pocsFile    string
 }
 
-func gogoCachePaths(cacheDir string) gogoCacheFiles {
-	root := filepath.Join(cacheDir, "gogo")
+func gogoCachePaths() gogoCacheFiles {
 	return gogoCacheFiles{
-		root:        root,
-		fingersFile: filepath.Join(root, "fingers.yaml"),
-		pocsFile:    filepath.Join(root, "pocs.yaml"),
+		fingersFile: "fingers.yaml",
+		pocsFile:    "pocs.yaml",
 	}
 }
 
@@ -224,33 +224,81 @@ func (c gogoCacheFiles) ready() bool {
 }
 
 func (c gogoCacheFiles) ensureDir() error {
-	return os.MkdirAll(c.root, 0o755)
+	// No-op since we're not creating directories
+	return nil
 }
 
-func exportGogoCache(ctx context.Context, cfg *CyberhubConfig, cache gogoCacheFiles) error {
-	client := cyberhub.NewClient(cfg.URL, cfg.Key, 60*time.Second)
+func (s *GogoScanner) fetchGogoDataFromAPI(ctx context.Context, endpoint string, workerKey string) (fingersData []byte, pocsData []byte, err error) {
+	fingersURL := endpoint + "/fingers"
+	pocsURL := endpoint + "/pocs"
 
-	fingersData, _, err := client.ExportFingers(ctx, "")
+	// Fetch fingers with Worker Key authentication
+	fingersReq, err := http.NewRequestWithContext(ctx, "GET", fingersURL, nil)
 	if err != nil {
-		return fmt.Errorf("export fingers failed: %w", err)
+		return nil, nil, fmt.Errorf("create fingers request failed: %w", err)
 	}
-	if err := cyberhub.SaveFingersToFile(cache.fingersFile, fingersData); err != nil {
-		return fmt.Errorf("save fingers cache failed: %w", err)
-	}
+	fingersReq.Header.Set("X-Worker-Key", workerKey)
 
-	pocResponses, err := client.ExportPOCs(ctx, nil, nil, "", "")
+	fingersResp, err := http.DefaultClient.Do(fingersReq)
 	if err != nil {
-		return fmt.Errorf("export pocs failed: %w", err)
+		return nil, nil, fmt.Errorf("fetch fingers from API failed: %w", err)
 	}
-	pocs := make([]*templates.Template, 0, len(pocResponses))
-	for _, resp := range pocResponses {
-		pocs = append(pocs, resp.GetTemplate())
-	}
-	if err := cyberhub.SaveTemplatesToFile(cache.pocsFile, pocs); err != nil {
-		return fmt.Errorf("save pocs cache failed: %w", err)
+	fingersData, err = io.ReadAll(fingersResp.Body)
+	fingersResp.Body.Close()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read fingers response failed: %w", err)
 	}
 
-	return nil
+	// Fetch pocs with Worker Key authentication
+	pocsReq, err := http.NewRequestWithContext(ctx, "GET", pocsURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create pocs request failed: %w", err)
+	}
+	pocsReq.Header.Set("X-Worker-Key", workerKey)
+
+	pocsResp, err := http.DefaultClient.Do(pocsReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch pocs from API failed: %w", err)
+	}
+	pocsData, err = io.ReadAll(pocsResp.Body)
+	pocsResp.Body.Close()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read pocs response failed: %w", err)
+	}
+
+	return fingersData, pocsData, nil
+}
+
+func (s *GogoScanner) initFromAPI(ctx context.Context, config *BootstrapConfig, cache gogoCacheFiles) error {
+	fingersData, pocsData, err := s.fetchGogoDataFromAPI(ctx, config.GogoAPIEndpoint, config.WorkerKey)
+	if err != nil {
+		return err
+	}
+
+	// Write to temp files first, then rename to target files
+	tmpFingersFile := cache.fingersFile + ".tmp"
+	tmpPocsFile := cache.pocsFile + ".tmp"
+
+	if err := os.WriteFile(tmpFingersFile, fingersData, 0o644); err != nil {
+		return fmt.Errorf("write temp fingers file failed: %w", err)
+	}
+	if err := os.WriteFile(tmpPocsFile, pocsData, 0o644); err != nil {
+		os.Remove(tmpFingersFile)
+		return fmt.Errorf("write temp pocs file failed: %w", err)
+	}
+
+	// Rename to final names
+	if err := os.Rename(tmpFingersFile, cache.fingersFile); err != nil {
+		os.Remove(tmpFingersFile)
+		os.Remove(tmpPocsFile)
+		return fmt.Errorf("rename fingers file failed: %w", err)
+	}
+	if err := os.Rename(tmpPocsFile, cache.pocsFile); err != nil {
+		os.Remove(tmpFingersFile)
+		return fmt.Errorf("rename pocs file failed: %w", err)
+	}
+
+	return s.initFromLocalCache(cache)
 }
 
 func (s *GogoScanner) initFromLocalCache(cache gogoCacheFiles) error {
