@@ -2,7 +2,6 @@ package gogo
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -102,7 +101,11 @@ func (l *GogoSyncLogic) SyncPocs() (*SyncResult, error) {
 
 		name := tpl.Info.Name
 		source := "cyberhub"
-		data, _ := json.Marshal(tpl)
+		data, err := yaml.Marshal(tpl)
+		if err != nil {
+			logx.Errorf("[GogoSync] Marshal POC %s to yaml failed: %v", name, err)
+			continue
+		}
 
 		doc := &model.GogoPoc{
 			Name:     name,
