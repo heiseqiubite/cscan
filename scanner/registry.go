@@ -188,7 +188,7 @@ func (r *ScannerRegistry) RegisterBuiltins() {
 
 	// Gogo 扫描器
 	r.Register("gogo", func(cfg *ScannerRegistryConfig) (Scanner, error) {
-		return NewGogoScanner(), nil
+		return NewGogoScanner(nil), nil
 	})
 }
 

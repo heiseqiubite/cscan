@@ -102,7 +102,7 @@ func TestExtractGogoOptionsFallsBackToTopLevel(t *testing.T) {
 }
 
 func TestGogoScannerBootstrapRequiresCyberhubOrCache(t *testing.T) {
-	scanner := NewGogoScanner()
+	scanner := NewGogoScanner(nil)
 	err := scanner.Bootstrap(context.Background(), &BootstrapConfig{CacheDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected bootstrap error without cyberhub config or cache")
@@ -135,7 +135,7 @@ func TestGogoScannerBootstrapUsesLocalCache(t *testing.T) {
 		t.Fatalf("write pocs cache failed: %v", err)
 	}
 
-	scanner := NewGogoScanner()
+	scanner := NewGogoScanner(nil)
 	err = scanner.Bootstrap(context.Background(), &BootstrapConfig{CacheDir: dir})
 	if err != nil {
 		t.Fatalf("bootstrap with local cache should not error: %v", err)
@@ -146,7 +146,7 @@ func TestGogoScannerBootstrapUsesLocalCache(t *testing.T) {
 }
 
 func TestGogoScannerScanRequiresInit(t *testing.T) {
-	scanner := NewGogoScanner()
+	scanner := NewGogoScanner(nil)
 	_, err := scanner.Scan(context.Background(), &ScanConfig{Target: "127.0.0.1"})
 	if err == nil {
 		t.Fatal("expected init error")

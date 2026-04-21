@@ -165,15 +165,49 @@ func extractGogoOptions(input interface{}) (*GogoOptions, error) {
 
 type GogoScanner struct {
 	BaseScanner
-	engine      *gogopkg.GogoEngine
-	initMu      sync.Mutex
-	cyberhubURL string
-	cyberhubKey string
-	inited      bool
+	engine       *gogopkg.GogoEngine
+	initMu       sync.Mutex
+	cyberhubURL  string
+	cyberhubKey  string
+	inited       bool
+	bootstrapCfg *BootstrapConfig // cached for lazy init reuse
 }
 
-func NewGogoScanner() *GogoScanner {
-	return &GogoScanner{BaseScanner: BaseScanner{name: "gogo"}}
+func NewGogoScanner(cfg *BootstrapConfig) *GogoScanner {
+	return &GogoScanner{
+		BaseScanner:  BaseScanner{name: "gogo"},
+		bootstrapCfg: cfg,
+	}
+}
+
+// GogoPortScanRequest encapsulates all parameters needed to execute a gogo port scan
+type GogoPortScanRequest struct {
+	Target      string
+	PortConfig  interface{}
+	WorkspaceId string
+	MainTaskId  string
+	TaskLogger  func(level, format string, args ...interface{})
+	OnProgress  func(progress int, message string)
+}
+
+// ExecutePortScan handles lazy init internally, replacing worker.go's executeGogoPortScan
+func (s *GogoScanner) ExecutePortScan(ctx context.Context, req *GogoPortScanRequest) (*ScanResult, error) {
+	if !s.IsInited() {
+		if s.bootstrapCfg == nil {
+			return nil, fmt.Errorf("gogo bootstrap config not provided")
+		}
+		if err := s.Bootstrap(ctx, s.bootstrapCfg); err != nil {
+			return nil, fmt.Errorf("gogo lazy bootstrap failed: %w", err)
+		}
+	}
+	return s.Scan(ctx, &ScanConfig{
+		Target:      req.Target,
+		Options:     req.PortConfig,
+		WorkspaceId: req.WorkspaceId,
+		MainTaskId:  req.MainTaskId,
+		TaskLogger:  req.TaskLogger,
+		OnProgress:  req.OnProgress,
+	})
 }
 
 func (s *GogoScanner) Bootstrap(ctx context.Context, config *BootstrapConfig) error {
