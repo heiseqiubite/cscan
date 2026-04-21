@@ -488,6 +488,12 @@ type GogoConfig struct {
 	Threads      int    `json:"threads"`
 	VersionLevel int    `json:"versionLevel"`
 	Exploit      string `json:"exploit"`
+	Mod          string `json:"mod"`          // 模式: default, s, ss, sc, sb
+	Delay        int    `json:"delay"`        // 扫描间隔(秒)
+	HttpsDelay   int    `json:"httpsDelay"`   // HTTPS 探测延迟(秒)
+	Ping         bool   `json:"ping"`         // Ping 探活
+	NoScan       bool   `json:"noScan"`       // 仅主机发现不做端口扫描
+	Exclude      string `json:"exclude"`      // 排除的端口
 }
 
 // PortIdentifyConfig 端口识别配置（Nmap/Fingerprintx 服务识别）

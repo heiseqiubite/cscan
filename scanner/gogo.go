@@ -180,36 +180,6 @@ func NewGogoScanner(cfg *BootstrapConfig) *GogoScanner {
 	}
 }
 
-// GogoPortScanRequest encapsulates all parameters needed to execute a gogo port scan
-type GogoPortScanRequest struct {
-	Target      string
-	PortConfig  interface{}
-	WorkspaceId string
-	MainTaskId  string
-	TaskLogger  func(level, format string, args ...interface{})
-	OnProgress  func(progress int, message string)
-}
-
-// ExecutePortScan handles lazy init internally, replacing worker.go's executeGogoPortScan
-func (s *GogoScanner) ExecutePortScan(ctx context.Context, req *GogoPortScanRequest) (*ScanResult, error) {
-	if !s.IsInited() {
-		if s.bootstrapCfg == nil {
-			return nil, fmt.Errorf("gogo bootstrap config not provided")
-		}
-		if err := s.Bootstrap(ctx, s.bootstrapCfg); err != nil {
-			return nil, fmt.Errorf("gogo lazy bootstrap failed: %w", err)
-		}
-	}
-	return s.Scan(ctx, &ScanConfig{
-		Target:      req.Target,
-		Options:     req.PortConfig,
-		WorkspaceId: req.WorkspaceId,
-		MainTaskId:  req.MainTaskId,
-		TaskLogger:  req.TaskLogger,
-		OnProgress:  req.OnProgress,
-	})
-}
-
 func (s *GogoScanner) Bootstrap(ctx context.Context, config *BootstrapConfig) error {
 	if config == nil {
 		return fmt.Errorf("bootstrap config is required")
@@ -449,13 +419,6 @@ func (s *GogoScanner) IsInited() bool {
 	return s.inited
 }
 
-func (s *GogoScanner) ensureInitialized() error {
-	if !s.IsInited() {
-		return fmt.Errorf("gogo scanner not initialized, please call Init() first")
-	}
-	return nil
-}
-
 func (s *GogoScanner) buildExecutionContext(ctx context.Context, opts *GogoOptions) *gogopkg.Context {
 	gogoCtx := gogopkg.NewContext().WithContext(ctx)
 	gogoCtx.SetThreads(opts.Threads)
@@ -488,8 +451,14 @@ func (s *GogoScanner) executeTargetScan(ctx context.Context, target string, opts
 }
 
 func (s *GogoScanner) Scan(ctx context.Context, config *ScanConfig) (*ScanResult, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
+	// Lazy init: bootstrap gogo engine on first Scan call
+	if !s.IsInited() {
+		if s.bootstrapCfg == nil {
+			return nil, fmt.Errorf("gogo bootstrap config not provided")
+		}
+		if err := s.Bootstrap(ctx, s.bootstrapCfg); err != nil {
+			return nil, fmt.Errorf("gogo lazy bootstrap failed: %w", err)
+		}
 	}
 
 	opts, err := normalizeGogoOptions(nil)

@@ -23,8 +23,11 @@ type Scanner interface {
 
 // BootstrapConfig 扫描器启动配置
 type BootstrapConfig struct {
-	CacheDir       string
-	CyberhubConfig *CyberhubConfig
+	CacheDir        string
+	CyberhubConfig  *CyberhubConfig
+	WorkerKey       string // Worker 认证密钥，用于 API 请求
+	GogoAPIEnabled  bool
+	GogoAPIEndpoint string
 }
 
 // Bootstrapper 支持启动预热的扫描器接口

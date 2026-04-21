@@ -308,7 +308,6 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 
 	// 注册扫描器
 	w.registerScanners()
-	w.initializeScanners()
 
 	// 初始化 IP 地理位置服务
 	w.initGeolocation()
@@ -455,49 +454,6 @@ func (w *Worker) GetScannerConfigRecommendation() *ScannerConfigRecommendation {
 	return nil
 }
 
-func (w *Worker) initializeScanner(ctx context.Context, name string, s scanner.Scanner, config *scanner.BootstrapConfig) error {
-	bootstrapper, ok := s.(scanner.Bootstrapper)
-	if !ok {
-		return nil
-	}
-	return bootstrapper.Bootstrap(ctx, config)
-}
-
-func (w *Worker) initializeScanners() {
-	for name, s := range w.scanners {
-		cfg, err := w.buildScannerBootstrapConfig(name)
-		if err != nil {
-			w.logger.Warn("Failed to build %s bootstrap config: %v", name, err)
-			continue
-		}
-		if err := w.initializeScanner(w.ctx, name, s, cfg); err != nil {
-			w.logger.Warn("Failed to bootstrap %s scanner: %v", name, err)
-		}
-	}
-}
-
-func (w *Worker) buildScannerBootstrapConfig(name string) (*scanner.BootstrapConfig, error) {
-	cfg := &scanner.BootstrapConfig{CacheDir: w.scannerCacheDir(name)}
-	if name != "gogo" {
-		return cfg, nil
-	}
-
-	// 设置 Gogo API 模式 - 优先从 cscan API 获取数据
-	cfg.GogoAPIEnabled = true
-	cfg.GogoAPIEndpoint = w.httpClient.baseURL + "/api/v1/gogo"
-	cfg.WorkerKey = w.config.InstallKey
-
-	return cfg, nil
-}
-
-func (w *Worker) scannerCacheDir(name string) string {
-	baseDir, err := os.UserCacheDir()
-	if err != nil || baseDir == "" {
-		baseDir = os.TempDir()
-	}
-	return filepath.Join(baseDir, "cscan", "scanners", name)
-}
-
 // registerScanners 注册扫描器
 func (w *Worker) registerScanners() {
 	w.scanners["portscan"] = scanner.NewPortScanner()
@@ -505,57 +461,24 @@ func (w *Worker) registerScanners() {
 	w.scanners["nmap"] = scanner.NewNmapScanner()
 	w.scanners["fingerprintx"] = scanner.NewFingerprintxScanner()
 	w.scanners["naabu"] = scanner.NewNaabuScanner()
-	w.scanners["gogo"] = scanner.NewGogoScanner()
+	w.scanners["gogo"] = scanner.NewGogoScanner(&scanner.BootstrapConfig{
+		CacheDir: func() string {
+			baseDir, _ := os.UserCacheDir()
+			if baseDir == "" {
+				baseDir = os.TempDir()
+			}
+			return filepath.Join(baseDir, "cscan", "scanners", "gogo")
+		}(),
+		GogoAPIEnabled:  true,
+		GogoAPIEndpoint: w.httpClient.baseURL + "/api/v1/gogo",
+		WorkerKey:       w.config.InstallKey,
+	})
 	w.scanners["subfinder"] = scanner.NewSubfinderScanner()
 	w.scanners["subdomain_bruteforce"] = scanner.NewSubdomainBruteforceScanner()
 	w.scanners["fingerprint"] = scanner.NewFingerprintScanner()
 	w.scanners["nuclei"] = scanner.NewNucleiScanner()
 	w.scanners["urlfinder"] = scanner.NewURLFinderScanner()
 	w.scanners["ffuf"] = scanner.NewFFufScanner()
-}
-
-func (w *Worker) executeGogoPortScan(
-	ctx context.Context,
-	task *scheduler.TaskInfo,
-	target string,
-	portConfig *scheduler.PortScanConfig,
-	taskLogger func(level, format string, args ...interface{}),
-	onProgress func(progress int, message string),
-) (*scanner.ScanResult, error) {
-	gogoScannerInterface, ok := w.scanners["gogo"]
-	if !ok {
-		return nil, fmt.Errorf("gogo scanner not registered")
-	}
-
-	// Type assertion to get *GogoScanner which has IsInited() and Bootstrap() methods
-	gogoScanner, ok := gogoScannerInterface.(*scanner.GogoScanner)
-	if !ok {
-		return nil, fmt.Errorf("gogo scanner has unexpected type")
-	}
-
-	// Lazy initialization: if scanner was not initialized at startup, try to initialize now
-	if !gogoScanner.IsInited() {
-		taskLogger(LevelInfo, "Gogo scanner not initialized, attempting lazy bootstrap...")
-		cfg := &scanner.BootstrapConfig{
-			GogoAPIEnabled:  true,
-			GogoAPIEndpoint: w.httpClient.baseURL + "/api/v1/gogo",
-			WorkerKey:       w.config.InstallKey,
-		}
-		if err := gogoScanner.Bootstrap(ctx, cfg); err != nil {
-			taskLogger(LevelError, "Gogo lazy bootstrap failed: %v", err)
-			return nil, fmt.Errorf("gogo scanner bootstrap failed: %w", err)
-		}
-		taskLogger(LevelInfo, "Gogo scanner initialized successfully")
-	}
-
-	return gogoScanner.Scan(ctx, &scanner.ScanConfig{
-		Target:      target,
-		Options:     portConfig,
-		WorkspaceId: task.WorkspaceId,
-		MainTaskId:  task.MainTaskId,
-		TaskLogger:  taskLogger,
-		OnProgress:  onProgress,
-	})
 }
 
 // Start 启动Worker
@@ -1723,7 +1646,12 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 			}
 		case "gogo":
 			w.taskLog(task.TaskId, LevelInfo, "Port scan: Gogo")
-			gogoResult, err := w.executeGogoPortScan(portCtx, task, target, config.PortScan, taskLogger, onProgress)
+			gogoResult, err := w.scanners["gogo"].Scan(portCtx, &scanner.ScanConfig{
+				Target:     target,
+				Options:    config.PortScan,
+				TaskLogger: taskLogger,
+				OnProgress: onProgress,
+			})
 			// 检查是否被停止或超时
 			if portCtx.Err() == context.DeadlineExceeded {
 				w.taskLog(task.TaskId, LevelWarn, "Port scan timeout, continuing with partial results")

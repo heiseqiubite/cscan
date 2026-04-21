@@ -402,17 +402,6 @@ func (e *PortScanExecutor) executePortDiscovery(
 ) ([]*scanner.Asset, error) {
 	w := e.worker
 
-	if tool == "gogo" {
-		result, err := w.executeGogoPortScan(ctx, task, target, config, taskLogger, onProgress)
-		if result == nil {
-			return nil, err
-		}
-		if len(result.Vulnerabilities) > 0 && saveVulnerabilities != nil {
-			saveVulnerabilities(result.Vulnerabilities)
-		}
-		return result.Assets, err
-	}
-
 	scannerName := tool
 	if scannerName == "" {
 		scannerName = "naabu"
@@ -431,6 +420,9 @@ func (e *PortScanExecutor) executePortDiscovery(
 	})
 	if result == nil {
 		return nil, err
+	}
+	if len(result.Vulnerabilities) > 0 && saveVulnerabilities != nil {
+		saveVulnerabilities(result.Vulnerabilities)
 	}
 	return result.Assets, err
 }
