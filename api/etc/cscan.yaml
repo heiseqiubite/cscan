@@ -11,24 +11,3 @@ Log:
   Encoding: plain
   TimeFormat: "15:04:05"
   
-Auth:
-  AccessSecret: "aKgPnXruwjMTjhDkSfNIP4LRZZkepj7vK4unzai68mJXTgdj"
-  AccessExpire: 86400
-
-Mongo:
-  Uri: "mongodb://admin:0218eb100fee4fbcb90194070b77ab38@101.132.153.5:27017"
-  DbName: "cscan"
-
-Redis:
-  Host: "101.132.153.5:6379"
-  Pass: "0218eb100fee4fbcb90194070b77ab38"
-  Type: node
-
-TaskRpc:
-  Endpoints:
-    - 127.0.0.1:9000
-  Timeout: 30000
-
-Cyberhub:
-  URL: "http://103.74.192.77:59080/"
-  Key: "ch_4042fa70a808f00bb3c19956dda17171e53a701ce094ad4efd944ae0824dd4d4"
