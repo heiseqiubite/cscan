@@ -10,11 +10,3 @@ Log:
   Encoding: plain
   TimeFormat: "15:04:05"
   
-Mongo:
-  Uri: "mongodb://admin:0218eb100fee4fbcb90194070b77ab38@101.132.153.5:27017"
-  DbName: "cscan"
-
-RedisConf:
-  Host: "101.132.153.5:6379"
-  Pass: "0218eb100fee4fbcb90194070b77ab38"
-  Type: node
