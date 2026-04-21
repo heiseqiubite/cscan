@@ -352,6 +352,8 @@ func (s *GogoScanner) createNeutronEngineFromLocal(path string) (*sdkneutron.Eng
 	return sdkneutron.NewEngine(cfg)
 }
 
+// Init is deprecated. Use Bootstrap with GogoAPIEnabled instead.
+// This method directly connects to Cyberhub and is only kept for backward compatibility.
 func (s *GogoScanner) Init(url, key string) error {
 	s.initMu.Lock()
 	defer s.initMu.Unlock()
@@ -373,6 +375,7 @@ func (s *GogoScanner) Init(url, key string) error {
 	return nil
 }
 
+// createGogoEngine is deprecated. Use createGogoEngineFromLocal instead.
 func (s *GogoScanner) createGogoEngine(url, key string) (*gogopkg.GogoEngine, error) {
 	fingersEngine, err := s.createFingersEngine(url, key)
 	if err != nil {
@@ -390,6 +393,7 @@ func (s *GogoScanner) createGogoEngine(url, key string) (*gogopkg.GogoEngine, er
 	return engine, nil
 }
 
+// createFingersEngine is deprecated. Use createFingersEngineFromLocal instead.
 func (s *GogoScanner) createFingersEngine(url, key string) (*sdkfingers.Engine, error) {
 	fingersConfig := sdkfingers.NewConfig()
 	fingersConfig.WithCyberhub(url, key)
@@ -397,6 +401,7 @@ func (s *GogoScanner) createFingersEngine(url, key string) (*sdkfingers.Engine, 
 	return sdkfingers.NewEngine(fingersConfig)
 }
 
+// createNeutronEngine is deprecated. Use createNeutronEngineFromLocal instead.
 func (s *GogoScanner) createNeutronEngine(url, key string) (*sdkneutron.Engine, error) {
 	neutronConfig := sdkneutron.NewConfig()
 	neutronConfig.WithCyberhub(url, key)
