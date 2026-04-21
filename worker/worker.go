@@ -482,20 +482,11 @@ func (w *Worker) buildScannerBootstrapConfig(name string) (*scanner.BootstrapCon
 		return cfg, nil
 	}
 
-	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
-	defer cancel()
+	// 设置 Gogo API 模式 - 优先从 cscan API 获取数据
+	cfg.GogoAPIEnabled = true
+	cfg.GogoAPIEndpoint = w.httpClient.baseURL + "/api/v1/gogo"
+	cfg.WorkerKey = w.config.InstallKey
 
-	gogoConfigResp, err := w.httpClient.GetGogoConfig(ctx)
-	if err != nil {
-		return cfg, err
-	}
-	if gogoConfigResp == nil || !gogoConfigResp.Success {
-		return cfg, fmt.Errorf("invalid gogo config response")
-	}
-	cfg.CyberhubConfig = &scanner.CyberhubConfig{
-		URL: gogoConfigResp.Data.URL,
-		Key: gogoConfigResp.Data.Key,
-	}
 	return cfg, nil
 }
 
@@ -531,9 +522,30 @@ func (w *Worker) executeGogoPortScan(
 	taskLogger func(level, format string, args ...interface{}),
 	onProgress func(progress int, message string),
 ) (*scanner.ScanResult, error) {
-	gogoScanner, ok := w.scanners["gogo"]
+	gogoScannerInterface, ok := w.scanners["gogo"]
 	if !ok {
 		return nil, fmt.Errorf("gogo scanner not registered")
+	}
+
+	// Type assertion to get *GogoScanner which has IsInited() and Bootstrap() methods
+	gogoScanner, ok := gogoScannerInterface.(*scanner.GogoScanner)
+	if !ok {
+		return nil, fmt.Errorf("gogo scanner has unexpected type")
+	}
+
+	// Lazy initialization: if scanner was not initialized at startup, try to initialize now
+	if !gogoScanner.IsInited() {
+		taskLogger(LevelInfo, "Gogo scanner not initialized, attempting lazy bootstrap...")
+		cfg := &scanner.BootstrapConfig{
+			GogoAPIEnabled:  true,
+			GogoAPIEndpoint: w.httpClient.baseURL + "/api/v1/gogo",
+			WorkerKey:       w.config.InstallKey,
+		}
+		if err := gogoScanner.Bootstrap(ctx, cfg); err != nil {
+			taskLogger(LevelError, "Gogo lazy bootstrap failed: %v", err)
+			return nil, fmt.Errorf("gogo scanner bootstrap failed: %w", err)
+		}
+		taskLogger(LevelInfo, "Gogo scanner initialized successfully")
 	}
 
 	return gogoScanner.Scan(ctx, &scanner.ScanConfig{
