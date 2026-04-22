@@ -31,10 +31,10 @@ func NewBaseLogic(ctx context.Context, svcCtx *svc.ServiceContext) BaseLogic {
 
 // PageRequest 通用分页请求
 type PageRequest struct {
-	Page     int    `json:"page,default=1"`
-	PageSize int    `json:"pageSize,default=20"`
-	Sort     string `json:"sort,optional"`
-	Order    string `json:"order,optional"` // asc or desc
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Sort     string `json:"sort,omitempty"`
+	Order    string `json:"order,omitempty"` // asc or desc
 }
 
 // PageResponse 通用分页响应
