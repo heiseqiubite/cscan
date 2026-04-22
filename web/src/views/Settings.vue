@@ -419,11 +419,14 @@
     <!-- 重置密码对话框 -->
     <el-dialog v-model="resetPasswordVisible" :title="$t('user.resetPassword')" width="400px">
       <el-form ref="resetFormRef" :model="resetForm" :rules="resetRules" label-width="80px">
+        <el-form-item :label="$t('user.oldPassword')" prop="oldPassword">
+          <el-input v-model="resetForm.oldPassword" type="password" :placeholder="$t('user.pleaseEnterOldPassword')" show-password />
+        </el-form-item>
         <el-form-item :label="$t('user.newPassword')" prop="newPassword">
-          <el-input v-model="resetForm.newPassword" type="password" :placeholder="$t('user.pleaseEnterNewPassword')" />
+          <el-input v-model="resetForm.newPassword" type="password" :placeholder="$t('user.pleaseEnterNewPassword')" show-password />
         </el-form-item>
         <el-form-item :label="$t('user.confirmPassword')" prop="confirmPassword">
-          <el-input v-model="resetForm.confirmPassword" type="password" :placeholder="$t('user.pleaseConfirmPassword')" />
+          <el-input v-model="resetForm.confirmPassword" type="password" :placeholder="$t('user.pleaseConfirmPassword')" show-password />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -514,8 +517,9 @@ const userRules = computed(() => ({
 const resetPasswordVisible = ref(false)
 const resetting = ref(false)
 const resetFormRef = ref()
-const resetForm = ref({ id: '', newPassword: '', confirmPassword: '' })
+const resetForm = ref({ id: '', oldPassword: '', newPassword: '', confirmPassword: '' })
 const resetRules = computed(() => ({
+  oldPassword: [{ required: true, message: t('user.pleaseEnterOldPassword'), trigger: 'blur' }],
   newPassword: [{ required: true, message: t('user.pleaseEnterNewPassword'), trigger: 'blur' }],
   confirmPassword: [
     { required: true, message: t('user.pleaseConfirmPassword'), trigger: 'blur' },
@@ -815,7 +819,7 @@ async function handleDeleteUser(row) {
 }
 
 function showResetPasswordDialog(row) {
-  resetForm.value = { id: row.id, newPassword: '', confirmPassword: '' }
+  resetForm.value = { id: row.id, oldPassword: '', newPassword: '', confirmPassword: '' }
   resetPasswordVisible.value = true
 }
 
@@ -826,6 +830,7 @@ async function handleResetPassword() {
     resetting.value = true
     const res = await resetUserPassword({
       id: resetForm.value.id,
+      oldPassword: resetForm.value.oldPassword,
       newPassword: resetForm.value.newPassword
     })
     if (res.code === 0) {
