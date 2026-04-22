@@ -1590,9 +1590,10 @@ func extractQuotedValue(s string) string {
 // unescapeQuotes 将转义的引号还原
 // 例如：id=\"swagger-ui 还原为 id="swagger-ui
 func unescapeQuotes(s string, quoteChar byte) string {
-	if quoteChar == '"' {
+	switch quoteChar {
+	case '"':
 		return strings.ReplaceAll(s, `\"`, `"`)
-	} else if quoteChar == '\'' {
+	case '\'':
 		return strings.ReplaceAll(s, `\'`, `'`)
 	}
 	return s
@@ -1836,9 +1837,10 @@ func (l *FingerprintBatchValidateLogic) FingerprintBatchValidate(req *types.Fing
 
 	// 获取所有启用的指纹
 	filter := map[string]interface{}{"enabled": true}
-	if req.Scope == "builtin" {
+	switch req.Scope {
+	case "builtin":
 		filter["is_builtin"] = true
-	} else if req.Scope == "custom" {
+	case "custom":
 		filter["is_builtin"] = false
 	}
 
@@ -2441,7 +2443,7 @@ func (l *HttpServiceImportLogic) ParseAndImport(content string) (*types.HttpServ
 		existing, _ := l.svcCtx.HttpServiceModel.GetMappings(l.ctx)
 		exists := false
 		for _, e := range existing {
-			if strings.ToLower(e.ServiceName) == strings.ToLower(m.ServiceName) {
+			if strings.EqualFold(e.ServiceName, m.ServiceName) {
 				exists = true
 				skipped++
 				break
