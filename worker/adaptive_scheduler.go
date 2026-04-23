@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"cscan/scanner"
 	"math"
 	"os"
 	"runtime"
@@ -88,32 +89,34 @@ type AdaptiveSchedulerConfig struct {
 
 // DefaultAdaptiveSchedulerConfig 默认配置
 // 根据系统硬件自适应调整阈值，低配机器使用更宽松的阈值
+// 复用 scanner.DetectSystemProfile() 统一硬件档位判定
 func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfig {
 	if baseConcurrency <= 0 {
 		baseConcurrency = runtime.NumCPU()
 	}
 
-	cpuCores := runtime.NumCPU()
-	totalMemMB := getAdaptiveSchedulerTotalMemMB()
+	// 复用 scanner 包的硬件档位判定，确保与扫描器参数一致
+	profile := scanner.DetectSystemProfile()
 
-	// 根据硬件配置分级
 	var cpuLow, cpuHigh, cpuCritical float64
 	var memLow, memHigh, memCritical float64
 	var processMemLowMB, processMemHighMB, processMemCriticalMB uint64
 
-	if cpuCores <= 4 || totalMemMB <= 4096 {
-		// 低配：放宽所有阈值，避免频繁限流
+	switch profile {
+	case scanner.ProfileLow:
+		// 低配 (<=4核 或 <=4GB): 大幅放宽阈值，避免频繁限流
+		// 注意: Go 程序 1.5GB RSS 是正常的，阈值必须高于此值
 		cpuLow = 50.0
-		cpuHigh = 80.0
-		cpuCritical = 92.0
-		memLow = 60.0
-		memHigh = 82.0
-		memCritical = 93.0
-		processMemLowMB = 512
-		processMemHighMB = 1024
-		processMemCriticalMB = 1536
-	} else if cpuCores <= 8 && totalMemMB <= 16384 {
-		// 中配：适度放宽
+		cpuHigh = 85.0
+		cpuCritical = 95.0
+		memLow = 65.0
+		memHigh = 85.0
+		memCritical = 95.0
+		processMemLowMB = 1024
+		processMemHighMB = 1536  // 允许 1.5GB 不触发降级
+		processMemCriticalMB = 2048 // 2GB 才触发 critical
+	case scanner.ProfileMedium:
+		// 中配 (<=8核 且 <=16GB): 适度放宽
 		cpuLow = 45.0
 		cpuHigh = 75.0
 		cpuCritical = 88.0
@@ -123,8 +126,8 @@ func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfi
 		processMemLowMB = 1024
 		processMemHighMB = 2048
 		processMemCriticalMB = 3072
-	} else {
-		// 高配：使用原始阈值
+	default:
+		// 高配 (>8核 或 >16GB): 使用较严格阈值
 		cpuLow = 40.0
 		cpuHigh = 70.0
 		cpuCritical = 85.0
@@ -159,15 +162,6 @@ func DefaultAdaptiveSchedulerConfig(baseConcurrency int) *AdaptiveSchedulerConfi
 		MaxPullInterval:               10 * time.Second,
 		IdleMultiplier:                2.0,
 	}
-}
-
-// getAdaptiveSchedulerTotalMemMB 获取系统总内存(MB)
-func getAdaptiveSchedulerTotalMemMB() uint64 {
-	memInfo, err := mem.VirtualMemory()
-	if err != nil {
-		return 0
-	}
-	return memInfo.Total / 1024 / 1024
 }
 
 // AdaptiveScheduler 自适应调度器
@@ -429,18 +423,28 @@ func (s *AdaptiveScheduler) adjustConcurrency() {
 }
 
 // determineMode 确定调度模式
+// 使用加权评分代替 OR 逻辑，避免单指标异常导致过度降级
 func (s *AdaptiveScheduler) determineMode() ScheduleMode {
 	cpu := s.smoothedCPU
 	mem := s.smoothedMem
 	processMemMB := s.getLatestProcessMemMB()
 
-	// 危急模式：CPU、系统内存或Worker进程内存任一超过危急阈值
+	// 1. 快速路径：任一指标超过危急阈值立即进入 critical（安全兜底）
 	if cpu >= s.config.CPUCriticalThreshold || mem >= s.config.MemCriticalThreshold || processMemMB >= s.config.ProcessMemCriticalThresholdMB {
 		return ModeCritical
 	}
 
-	// 保守模式：CPU、系统内存或Worker进程内存任一超过高阈值
-	if cpu >= s.config.CPUHighThreshold || mem >= s.config.MemHighThreshold || processMemMB >= s.config.ProcessMemHighThresholdMB {
+	// 2. 加权评分：综合考量 CPU、系统内存、进程内存
+	// 每个指标 0-100 分，越高表示压力越大
+	cpuScore := s.computePressureScore(cpu, s.config.CPULowThreshold, s.config.CPUHighThreshold)
+	memScore := s.computePressureScore(mem, s.config.MemLowThreshold, s.config.MemHighThreshold)
+	processMemScore := s.computeProcessMemPressureScore(processMemMB)
+
+	// 加权平均：CPU 权重 0.4，系统内存 0.3，进程内存 0.3
+	weightedScore := cpuScore*0.4 + memScore*0.3 + processMemScore*0.3
+
+	// 3. 根据综合评分确定模式
+	if weightedScore >= 70 {
 		return ModeConservative
 	}
 
@@ -449,8 +453,34 @@ func (s *AdaptiveScheduler) determineMode() ScheduleMode {
 		return ModeAggressive
 	}
 
-	// 正常模式
 	return ModeNormal
+}
+
+// computePressureScore 计算资源压力评分 (0-100)
+// low 以下为 0，high 以上为 100，中间线性插值
+func (s *AdaptiveScheduler) computePressureScore(current, lowThreshold, highThreshold float64) float64 {
+	if current <= lowThreshold {
+		return 0
+	}
+	if current >= highThreshold {
+		return 100
+	}
+	return (current - lowThreshold) / (highThreshold - lowThreshold) * 100
+}
+
+// computeProcessMemPressureScore 计算进程内存压力评分 (0-100)
+func (s *AdaptiveScheduler) computeProcessMemPressureScore(processMemMB uint64) float64 {
+	low := float64(s.config.ProcessMemLowThresholdMB)
+	high := float64(s.config.ProcessMemHighThresholdMB)
+	current := float64(processMemMB)
+
+	if current <= low {
+		return 0
+	}
+	if current >= high {
+		return 100
+	}
+	return (current - low) / (high - low) * 100
 }
 
 func (s *AdaptiveScheduler) getLatestProcessMemMB() uint64 {
@@ -471,18 +501,25 @@ func (s *AdaptiveScheduler) getLatestAvailMemoryMB() uint64 {
 }
 
 // calculateTargetConcurrency 计算目标并发数
+// 根据模式使用更细粒度的梯度，避免粗暴折扣导致并发骤降
 func (s *AdaptiveScheduler) calculateTargetConcurrency(mode ScheduleMode) int {
 	base := s.config.BaseConcurrency
 
 	switch mode {
 	case ModeCritical:
-		return int(float64(base) * 0.25) // 25%
+		// 危急模式：至少保留 1，最多 50%
+		target := int(float64(base) * 0.5)
+		if target < 1 {
+			target = 1
+		}
+		return target
 	case ModeConservative:
-		return int(float64(base) * 0.5) // 50%
+		// 保守模式：保留 75%，不再一刀切到 50%
+		return int(float64(base) * 0.75)
 	case ModeNormal:
-		return base // 正常模式保持用户配置的 task 并发上限
+		return base
 	case ModeAggressive:
-		return base // 激进模式也不再扩容，避免 task 数进一步放大内存占用
+		return base
 	default:
 		return base
 	}
