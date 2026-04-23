@@ -73,16 +73,18 @@ type TaskContext struct {
 	CompletedPhases map[TaskPhase]bool
 	Runner          *TaskRunner
 	Worker          *Worker // 引用Worker以访问其方法
+	SkippedHosts    []string // 因端口阈值超限被跳过的主机列表，后续阶段应跳过这些主机
 }
 
 // PhaseResult 阶段执行结果
 type PhaseResult struct {
 	Assets          []*scanner.Asset
 	Vulnerabilities []*scanner.Vulnerability
-	Stopped         bool   // 是否被停止
-	Paused          bool   // 是否被暂停
-	Error           error  // 执行错误
-	Message         string // 结果消息
+	Stopped         bool     // 是否被停止
+	Paused          bool     // 是否被暂停
+	Error           error    // 执行错误
+	Message         string   // 结果消息
+	SkippedHosts    []string // 因端口阈值超限被跳过的主机列表
 }
 
 // TaskRunnerConfig 任务执行器配置
@@ -236,6 +238,9 @@ func (r *TaskRunner) Run(ctx context.Context, task *scheduler.TaskInfo, worker *
 			}
 			if len(result.Vulnerabilities) > 0 {
 				taskCtx.Vulnerabilities = append(taskCtx.Vulnerabilities, result.Vulnerabilities...)
+			}
+			if len(result.SkippedHosts) > 0 {
+				taskCtx.SkippedHosts = append(taskCtx.SkippedHosts, result.SkippedHosts...)
 			}
 		}
 
@@ -407,6 +412,7 @@ func (r *TaskRunner) executePhaseDefault(taskCtx *TaskContext, phaseConfig Phase
 	return &PhaseResult{
 		Assets:          result.Assets,
 		Vulnerabilities: result.Vulnerabilities,
+		SkippedHosts:    result.SkippedHosts,
 	}, nil
 }
 
