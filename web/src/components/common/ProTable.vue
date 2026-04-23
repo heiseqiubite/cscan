@@ -147,7 +147,7 @@
     </div>
 
     <!-- Main Table -->
-    <el-table v-loading="loading" :data="tableData" v-bind="$attrs" @selection-change="handleSelectionChange">
+    <el-table v-loading="loading" :data="tableData" v-bind="$attrs" @selection-change="handleSelectionChange" @sort-change="handleSortChange">
       <el-table-column v-if="selection" type="selection" width="40" />
 
       <template v-for="(col, index) in columns" :key="index">
@@ -264,6 +264,10 @@ const pagination = reactive({
   page: 1,
   pageSize: 10,
   total: 0
+})
+const sortState = reactive({
+  prop: '',
+  order: ''
 })
 
 // I18n
@@ -385,6 +389,12 @@ async function loadData() {
       pageSize: pagination.pageSize,
       query: searchQuery.value,
       ...searchForm
+    }
+
+    // Add sort parameters if sorting is active
+    if (sortState.prop && sortState.order) {
+      payload.sortField = sortState.prop
+      payload.sortOrder = sortState.order === 'ascending' ? 'asc' : 'desc'
     }
 
     // Cast specific fields to Number if they are defined as numbers in searchItems
@@ -514,6 +524,14 @@ function resetSearch() {
 // Selection changes
 function handleSelectionChange(rows) {
   selectedRows.value = rows
+}
+
+// Sort changes
+function handleSortChange({ prop, order }) {
+  sortState.prop = prop
+  sortState.order = order
+  pagination.page = 1
+  loadData()
 }
 
 // Batch delete
@@ -711,6 +729,7 @@ defineExpose({
   loading,
   pagination,
   searchForm,
+  sortState,
   loadData,
   handleSearch
 })
