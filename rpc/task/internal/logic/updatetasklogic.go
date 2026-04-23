@@ -194,7 +194,13 @@ func (l *UpdateTaskLogic) updateTaskInDBWithPhase(taskId, state, result, phase s
 		// 触发任务完成通知
 		l.sendTaskNotification(workspaceId, mainTaskId, state)
 	case "FAILURE":
-		// 任务失败时设置结束时间
+		// 如果有多个子任务（subTaskCount > 1），不在这里更新主任务状态
+		// 主任务的失败状态由 IncrSubTaskDone 在所有子任务完成后设置
+		if subTaskCount > 1 {
+			l.Logger.Infof("UpdateTask: task %s has %d sub-tasks, skipping FAILURE status update (managed by IncrSubTaskDone)", taskId, subTaskCount)
+			return
+		}
+		// 单任务（subTaskCount <= 1）失败时设置结束时间
 		update["end_time"] = now
 		update["result"] = result
 		// 触发任务失败通知
@@ -278,14 +284,36 @@ func (l *UpdateTaskLogic) sendTaskNotification(workspaceId, mainTaskId, status s
 		}
 	}
 
-	// 加载全局高危过滤配置并合并到没有自带 HighRiskFilter 的配置项
+	// 加载全局高危过滤配置并合并到没有自带有效 HighRiskFilter 的配置项
+	// 如果通知配置启用了高危过滤但没有设置任何条件，也要使用全局配置
 	globalHighRiskFilter := l.loadGlobalHighRiskFilter()
 	if globalHighRiskFilter != nil && globalHighRiskFilter.Enabled {
+		l.Logger.Infof("sendTaskNotification: global filter is enabled, fingerprints=%v, ports=%v, severities=%v",
+			globalHighRiskFilter.HighRiskFingerprints, globalHighRiskFilter.HighRiskPorts, globalHighRiskFilter.HighRiskPocSeverities)
+		
 		for i := range configItems {
 			if configItems[i].HighRiskFilter == nil {
+				// 没有 HighRiskFilter，直接使用全局配置
 				configItems[i].HighRiskFilter = globalHighRiskFilter
+				l.Logger.Infof("sendTaskNotification: using global filter for provider %s (no local filter)", configItems[i].Provider)
+			} else if configItems[i].HighRiskFilter.Enabled {
+				// 通知配置启用了高危过滤，检查是否有设置有效条件
+				hasValidFilter := len(configItems[i].HighRiskFilter.HighRiskFingerprints) > 0 ||
+					len(configItems[i].HighRiskFilter.HighRiskPorts) > 0 ||
+					len(configItems[i].HighRiskFilter.HighRiskPocSeverities) > 0 ||
+					configItems[i].HighRiskFilter.NewAssetNotify
+				
+				if !hasValidFilter {
+					// 启用了过滤但没有设置条件，使用全局配置
+					configItems[i].HighRiskFilter = globalHighRiskFilter
+					l.Logger.Infof("sendTaskNotification: using global high-risk filter for provider %s (no valid local filter)", configItems[i].Provider)
+				} else {
+					l.Logger.Infof("sendTaskNotification: provider %s has valid local filter, not using global", configItems[i].Provider)
+				}
 			}
 		}
+	} else {
+		l.Logger.Infof("sendTaskNotification: global filter is nil or disabled, globalHighRiskFilter=%v", globalHighRiskFilter)
 	}
 
 	// 构建报告URL
@@ -352,6 +380,9 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 		}
 	}
 
+	l.Logger.Infof("[HIGH-RISK COLLECT] workspaceId=%s, mainTaskId=%s, hasHighRiskFilter=%v, fingerprints=%v, ports=%v, severities=%v",
+		workspaceId, mainTaskId, hasHighRiskFilter, allFingerprints, allPorts, allSeverities)
+
 	// 如果没有配置启用高危过滤，不需要收集
 	if !hasHighRiskFilter {
 		return nil
@@ -367,6 +398,7 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 	if len(allFingerprints) > 0 {
 		assetModel := l.svcCtx.GetAssetModel(workspaceId)
 		assets, err := assetModel.FindByTaskId(l.ctx, mainTaskId)
+		l.Logger.Infof("[HIGH-RISK COLLECT] Fingerprint check: assetCount=%d, err=%v", len(assets), err)
 		if err == nil {
 			fingerprintSet := make(map[string]bool)
 			for _, fp := range allFingerprints {
@@ -381,6 +413,7 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 					}
 				}
 			}
+			l.Logger.Infof("[HIGH-RISK COLLECT] Found fingerprints: %v", info.HighRiskFingerprints)
 		}
 	}
 
@@ -388,6 +421,7 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 	if len(allPorts) > 0 {
 		assetModel := l.svcCtx.GetAssetModel(workspaceId)
 		assets, err := assetModel.FindByTaskId(l.ctx, mainTaskId)
+		l.Logger.Infof("[HIGH-RISK COLLECT] Port check: assetCount=%d, err=%v", len(assets), err)
 		if err == nil {
 			portSet := make(map[int]bool)
 			for _, port := range allPorts {
@@ -400,6 +434,7 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 					foundPortSet[asset.Port] = true
 				}
 			}
+			l.Logger.Infof("[HIGH-RISK COLLECT] Found ports: %v", info.HighRiskPorts)
 		}
 	}
 
@@ -407,6 +442,7 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 	if len(allSeverities) > 0 {
 		vulModel := l.svcCtx.GetVulModel(workspaceId)
 		vuls, err := vulModel.Find(l.ctx, bson.M{"task_id": mainTaskId}, 0, 0)
+		l.Logger.Infof("[HIGH-RISK COLLECT] Severity check: vulCount=%d, err=%v", len(vuls), err)
 		if err == nil {
 			severitySet := make(map[string]bool)
 			for _, s := range allSeverities {
@@ -418,9 +454,11 @@ func (l *UpdateTaskLogic) collectHighRiskInfo(workspaceId, mainTaskId string, co
 					info.HighRiskVulCount++
 				}
 			}
+			l.Logger.Infof("[HIGH-RISK COLLECT] Found severities: %v", info.HighRiskVulSeverities)
 		}
 	}
 
+	l.Logger.Infof("[HIGH-RISK COLLECT] Final result: %+v", info)
 	return info
 }
 
@@ -435,6 +473,7 @@ func (l *UpdateTaskLogic) loadGlobalHighRiskFilter() *notify.HighRiskFilter {
 
 	err := collection.FindOne(l.ctx, bson.M{"key": "high_risk_filter_config"}).Decode(&result)
 	if err != nil {
+		l.Logger.Infof("loadGlobalHighRiskFilter: not found in DB, error=%v", err)
 		return nil
 	}
 
@@ -450,6 +489,9 @@ func (l *UpdateTaskLogic) loadGlobalHighRiskFilter() *notify.HighRiskFilter {
 		l.Logger.Errorf("loadGlobalHighRiskFilter: failed to unmarshal config: %v", err)
 		return nil
 	}
+
+	l.Logger.Infof("loadGlobalHighRiskFilter: enabled=%v, fingerprints=%v, ports=%v, severities=%v, newAsset=%v",
+		config.Enabled, config.HighRiskFingerprints, config.HighRiskPorts, config.HighRiskPocSeverities, config.NewAssetNotify)
 
 	return &notify.HighRiskFilter{
 		Enabled:               config.Enabled,
