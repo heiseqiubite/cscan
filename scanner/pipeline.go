@@ -140,11 +140,11 @@ func (p *Pipeline) Execute(ctx context.Context, input *StageInput) (*ScanResult,
 
 		// 合并结果
 		if len(output.Assets) > 0 {
-			// result.Assets = append(result.Assets, output.Assets...)
-			// input.Assets = append(input.Assets, output.Assets...) // 传递给下一阶段
+			result.Assets = append(result.Assets, output.Assets...)
+			input.Assets = append(input.Assets, output.Assets...) // 传递给下一阶段
 		}
 		if len(output.Vulnerabilities) > 0 {
-			// result.Vulnerabilities = append(result.Vulnerabilities, output.Vulnerabilities...)
+			result.Vulnerabilities = append(result.Vulnerabilities, output.Vulnerabilities...)
 		}
 
 		// 合并数据
@@ -208,6 +208,7 @@ type Task[T any, R any] struct {
 }
 
 // Execute 并发执行任务
+// Deprecated: 使用 ExecuteGeneric 替代，支持任意输入/输出类型
 func (e *ConcurrentExecutor) Execute(ctx context.Context, tasks []Task[string, *Asset]) ([]*Asset, error) {
 	if len(tasks) == 0 {
 		return nil, nil
@@ -375,18 +376,22 @@ func (c *ResultCollector) AddVulnerabilities(vuls []*Vulnerability) {
 	c.mu.Unlock()
 }
 
-// GetAssets 获取所有资产
+// GetAssets 获取所有资产（返回防御性副本）
 func (c *ResultCollector) GetAssets() []*Asset {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.assets
+	result := make([]*Asset, len(c.assets))
+	copy(result, c.assets)
+	return result
 }
 
-// GetVulnerabilities 获取所有漏洞
+// GetVulnerabilities 获取所有漏洞（返回防御性副本）
 func (c *ResultCollector) GetVulnerabilities() []*Vulnerability {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.vuls
+	result := make([]*Vulnerability, len(c.vuls))
+	copy(result, c.vuls)
+	return result
 }
 
 // ToScanResult 转换为扫描结果
