@@ -579,10 +579,6 @@
             <template #title>
               <span class="collapse-title">{{ $t('task.advancedSettings') }}</span>
             </template>
-            <el-form-item :label="$t('task.taskSplit')">
-              <el-input-number v-model="form.batchSize" :min="0" :max="1000" :step="10" />
-              <span class="form-hint">{{ $t('task.batchTargetCount') }}</span>
-            </el-form-item>
           </el-collapse-item>
         </el-collapse>
 
@@ -1001,7 +997,7 @@ const form = reactive({
   orgId: '',
   tags: [], // 任务标签
   workers: [],
-  batchSize: 50,
+  // batchSize 由后端自动计算，前端不再设置
   // 子域名扫描
   domainscanEnable: false,
   domainscanSubfinder: true,
@@ -1218,7 +1214,7 @@ function applyConfig(config) {
   const hasBruteforce = config.domainscan?.subdomainDictIds?.length > 0
   
   Object.assign(form, {
-    batchSize: config.batchSize || 50,
+    // batchSize 由后端自动计算，不再从配置加载
     // 子域名扫描
     domainscanEnable: config.domainscan?.enable ?? false,
     domainscanSubfinder: config.domainscan?.subfinder ?? true,
@@ -1311,7 +1307,6 @@ function debounceSaveConfig() {
 // 使用 getter 函数返回配置字段的快照
 watch(
   () => JSON.stringify({
-    batchSize: form.batchSize,
     domainscanEnable: form.domainscanEnable,
     domainscanSubfinder: form.domainscanSubfinder,
     domainscanBruteforce: form.domainscanBruteforce,
@@ -1411,7 +1406,7 @@ function buildCustomHeaders() {
 function buildConfig() {
   const config = {
     template: selectedTemplate.value,
-    batchSize: form.batchSize,
+    // batchSize 由后端根据目标数量和Worker并发数自动计算
     domainscan: {
       enable: form.domainscanEnable,
       subfinder: form.domainscanSubfinder,
