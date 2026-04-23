@@ -2,6 +2,8 @@ package logic
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
@@ -41,7 +43,7 @@ func (l *NotifyConfigListLogic) NotifyConfigList() (resp *types.NotifyConfigList
 			Provider:        c.Provider,
 			Config:          c.Config,
 			Status:          c.Status,
-			MessageTemplate: c.MessageTemplate,
+			MessageTemplate: ensureHighRiskDetailsPlaceholder(c.MessageTemplate),
 			WebURL:          c.WebURL,
 			CreateTime:      c.CreateTime.Local().Format("2006-01-02 15:04:05"),
 			UpdateTime:      c.UpdateTime.Local().Format("2006-01-02 15:04:05"),
@@ -80,10 +82,83 @@ func NewNotifyConfigSaveLogic(ctx context.Context, svcCtx *svc.ServiceContext) *
 	}
 }
 
+// severityChineseToEnglish 中文严重级别到英文的映射
+var severityChineseToEnglish = map[string]string{
+	"严重": "critical",
+	"高危": "high",
+	"中危": "medium",
+	"低危": "low",
+}
+
+// convertPortsToIntSlice 转换端口数组为整数数组
+func convertPortsToIntSlice(ports interface{}) []int {
+	if ports == nil {
+		return nil
+	}
+
+	result := make([]int, 0)
+
+	switch v := ports.(type) {
+	case []int:
+		return v
+	case []interface{}:
+		for _, item := range v {
+			switch i := item.(type) {
+			case int:
+				result = append(result, i)
+			case float64:
+				result = append(result, int(i))
+			case string:
+				if port, err := strconv.Atoi(i); err == nil {
+					result = append(result, port)
+				}
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if port, err := strconv.Atoi(s); err == nil {
+				result = append(result, port)
+			}
+		}
+	}
+
+	return result
+}
+
+// convertSeveritiesToEnglish 将中文严重级别转换为英文
+func convertSeveritiesToEnglish(severities []string) []string {
+	if severities == nil {
+		return nil
+	}
+
+	result := make([]string, 0, len(severities))
+	seen := make(map[string]bool)
+
+	for _, s := range severities {
+		if english, ok := severityChineseToEnglish[s]; ok {
+			if !seen[english] {
+				result = append(result, english)
+				seen[english] = true
+			}
+		} else {
+			// 非中文级别直接添加（保留原始值）
+			if !seen[s] {
+				result = append(result, s)
+				seen[s] = true
+			}
+		}
+	}
+
+	return result
+}
+
 func (l *NotifyConfigSaveLogic) NotifyConfigSave(req *types.NotifyConfigSaveReq) (resp *types.BaseResp, err error) {
 	if req.Provider == "" {
 		return &types.BaseResp{Code: 400, Msg: "提供者类型不能为空"}, nil
 	}
+
+	// 确保消息模板包含高危详情占位符
+	messageTemplate := ensureHighRiskDetailsPlaceholder(req.MessageTemplate)
 
 	// 转换高危过滤配置
 	var highRiskFilter *model.HighRiskFilter
@@ -91,8 +166,9 @@ func (l *NotifyConfigSaveLogic) NotifyConfigSave(req *types.NotifyConfigSaveReq)
 		highRiskFilter = &model.HighRiskFilter{
 			Enabled:               req.HighRiskFilter.Enabled,
 			HighRiskFingerprints:  req.HighRiskFilter.HighRiskFingerprints,
-			HighRiskPorts:         req.HighRiskFilter.HighRiskPorts,
-			HighRiskPocSeverities: req.HighRiskFilter.HighRiskPocSeverities,
+			HighRiskPorts:         convertPortsToIntSlice(req.HighRiskFilter.HighRiskPorts),
+			HighRiskPocSeverities: convertSeveritiesToEnglish(req.HighRiskFilter.HighRiskPocSeverities),
+			NewAssetNotify:        req.HighRiskFilter.NewAssetNotify,
 		}
 	}
 
@@ -101,7 +177,7 @@ func (l *NotifyConfigSaveLogic) NotifyConfigSave(req *types.NotifyConfigSaveReq)
 		Provider:        req.Provider,
 		Config:          req.Config,
 		Status:          req.Status,
-		MessageTemplate: req.MessageTemplate,
+		MessageTemplate: messageTemplate,
 		WebURL:          req.WebURL,
 		HighRiskFilter:  highRiskFilter,
 	}
@@ -112,7 +188,7 @@ func (l *NotifyConfigSaveLogic) NotifyConfigSave(req *types.NotifyConfigSaveReq)
 			"name":             req.Name,
 			"config":           req.Config,
 			"status":           req.Status,
-			"message_template": req.MessageTemplate,
+			"message_template": messageTemplate,
 			"web_url":          req.WebURL,
 		}
 		if highRiskFilter != nil {
@@ -131,6 +207,19 @@ func (l *NotifyConfigSaveLogic) NotifyConfigSave(req *types.NotifyConfigSaveReq)
 	}
 
 	return &types.BaseResp{Code: 0, Msg: "保存成功"}, nil
+}
+
+// ensureHighRiskDetailsPlaceholder 确保消息模板包含高危详情占位符
+// 如果模板为空或不含 {{highRiskDetails}}，自动追加
+func ensureHighRiskDetailsPlaceholder(template string) string {
+	if template == "" {
+		return "" // 空模板使用默认模板
+	}
+	if !strings.Contains(template, "{{highRiskDetails}}") {
+		// 自动追加高危详情
+		return template + "{{highRiskDetails}}"
+	}
+	return template
 }
 
 // NotifyConfigDeleteLogic 删除通知配置
