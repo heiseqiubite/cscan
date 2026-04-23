@@ -1059,15 +1059,10 @@ func (l *MainTaskResumeLogic) MainTaskResume(req *types.MainTaskControlReq, work
 	// 获取目标
 	target, _ := taskConfig["target"].(string)
 
-	// 从配置中获取批次大小，默认50
-	batchSize := 50
-	if bs, ok := taskConfig["batchSize"].(float64); ok {
-		if bs == 0 {
-			batchSize = 1000000
-		} else if bs > 0 {
-			batchSize = int(bs)
-		}
-	}
+	// 从配置中获取批次大小，使用 TaskBuilder 自动计算逻辑
+	builder := common.NewTaskBuilder(l.ctx, l.svcCtx)
+	batchSize := builder.CalculateOptimalBatchSize(target, taskConfig)
+	l.Logger.Infof("MainTaskResume: auto-calculated batchSize=%d for task %s", batchSize, task.TaskId)
 
 	// 使用目标拆分器判断是否需要拆分
 	splitter := scheduler.NewTargetSplitter(batchSize)
