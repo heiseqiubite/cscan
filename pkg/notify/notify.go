@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +104,9 @@ func FormatMessage(result *NotifyResult, template string) string {
 		statusEmoji = "❌"
 	}
 
+	// 构建高危详情字符串
+	highRiskDetails := buildHighRiskDetails(result.HighRiskInfo)
+
 	replacer := strings.NewReplacer(
 		"{{taskName}}", result.TaskName,
 		"{{taskId}}", result.TaskId,
@@ -115,9 +119,59 @@ func FormatMessage(result *NotifyResult, template string) string {
 		"{{endTime}}", result.EndTime.Format("2006-01-02 15:04:05"),
 		"{{workspaceId}}", result.WorkspaceId,
 		"{{reportUrl}}", result.ReportURL,
+		"{{highRiskDetails}}", highRiskDetails,
 	)
 
 	return replacer.Replace(template)
+}
+
+// buildHighRiskDetails 构建高危详情字符串
+func buildHighRiskDetails(info *HighRiskInfo) string {
+	if info == nil {
+		return ""
+	}
+
+	// 预分配切片，避免频繁append
+	parts := make([]string, 0, 4)
+	hasContent := false
+
+	// 高危指纹
+	if len(info.HighRiskFingerprints) > 0 {
+		parts = append(parts, fmt.Sprintf("\n🚨 高危指纹: %s", strings.Join(info.HighRiskFingerprints, ", ")))
+		hasContent = true
+	}
+
+	// 高危端口
+	if len(info.HighRiskPorts) > 0 {
+		portStrs := make([]string, len(info.HighRiskPorts))
+		for i, port := range info.HighRiskPorts {
+			portStrs[i] = strconv.Itoa(port)
+		}
+		parts = append(parts, fmt.Sprintf("\n🚨 高危端口: %s", strings.Join(portStrs, ", ")))
+		hasContent = true
+	}
+
+	// 高危漏洞：安全处理nil map
+	if info.HighRiskVulCount > 0 && len(info.HighRiskVulSeverities) > 0 {
+		vulParts := make([]string, 0, len(info.HighRiskVulSeverities))
+		for severity, count := range info.HighRiskVulSeverities {
+			vulParts = append(vulParts, fmt.Sprintf("%s: %d", severity, count))
+		}
+		parts = append(parts, fmt.Sprintf("\n🚨 高危漏洞: %s (共 %d 个)", strings.Join(vulParts, ", "), info.HighRiskVulCount))
+		hasContent = true
+	}
+
+	// 新发现资产
+	if info.NewAssetCount > 0 {
+		parts = append(parts, fmt.Sprintf("\n🆕 新发现资产: %d 个", info.NewAssetCount))
+		hasContent = true
+	}
+
+	if !hasContent {
+		return ""
+	}
+
+	return strings.Join(parts, "")
 }
 
 // DefaultTemplate 默认消息模板
@@ -130,7 +184,7 @@ const DefaultTemplate = `{{statusEmoji}} 扫描任务完成
 执行时长: {{duration}}
 开始时间: {{startTime}}
 结束时间: {{endTime}}
-报告地址: {{reportUrl}}`
+报告地址: {{reportUrl}}{{highRiskDetails}}`
 
 // MarkdownTemplate Markdown格式模板
 const MarkdownTemplate = `## {{statusEmoji}} 扫描任务完成
