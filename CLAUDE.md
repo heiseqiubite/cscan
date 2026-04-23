@@ -554,7 +554,7 @@ docker-compose -f docker-compose-worker.yaml up -d
 .\cscan.bat       # Windows
 ```
 
-访问 `https://ip:3443`，默认账号 `admin / 123456`
+访问 `https://ip:7777`，默认账号 `admin / 123456`
 
 ---
 

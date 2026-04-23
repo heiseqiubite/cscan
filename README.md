@@ -37,7 +37,7 @@ chmod +x cscan.sh && ./cscan.sh
 .\cscan.bat
 ```
 
-> 访问 `https://ip:3443`，默认账号 `admin / 123456`
+> 访问 `https://ip:7777`，默认账号 `admin / 123456`
 > 
 > 执行扫描前需先部署 Worker 节点
 

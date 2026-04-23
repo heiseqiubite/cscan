@@ -38,7 +38,7 @@ chmod +x cscan.sh && ./cscan.sh
 .\cscan.bat
 ```
 
-> Access `https://ip:3443`, default account `admin / 123456`
+> Access `https://ip:7777`, default account `admin / 123456`
 >
 > Worker nodes must be deployed before executing scans
 
