@@ -66,6 +66,7 @@ type ScanResult struct {
 	MainTaskId      string           `json:"mainTaskId"`
 	Assets          []*Asset         `json:"assets"`
 	Vulnerabilities []*Vulnerability `json:"vulnerabilities"`
+	SkippedHosts    []string         `json:"skippedHosts,omitempty"` // 因端口阈值超限被跳过的主机列表
 }
 
 // Asset 资产
