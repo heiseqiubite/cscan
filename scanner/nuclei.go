@@ -412,12 +412,17 @@ func (s *NucleiScanner) ScanBatch(ctx context.Context, targets []string, opts *N
 	var customTemplatePaths []string
 	var templateMetas []templateMeta
 
-	if len(opts.CustomTemplates) > 0 {
+	// 合并 CustomTemplates 和 NucleiTemplates 为统一的模板列表
+	allTemplateContents := make([]string, 0, len(opts.CustomTemplates)+len(opts.NucleiTemplates))
+	allTemplateContents = append(allTemplateContents, opts.CustomTemplates...)
+	allTemplateContents = append(allTemplateContents, opts.NucleiTemplates...)
+
+	if len(allTemplateContents) > 0 {
 		cache := getTemplateCache()
 		cache.EvictStale()
 
-		taskLog("INFO", "Preparing %d POC templates", len(opts.CustomTemplates))
-		for i, content := range opts.CustomTemplates {
+		taskLog("INFO", "Preparing %d POC templates (custom=%d, nuclei=%d)", len(allTemplateContents), len(opts.CustomTemplates), len(opts.NucleiTemplates))
+		for i, content := range allTemplateContents {
 			// 1. 廉价的YAML预校验
 			templateID, err := preValidateTemplate(content)
 			if err != nil {
@@ -464,14 +469,15 @@ func (s *NucleiScanner) ScanBatch(ctx context.Context, targets []string, opts *N
 		}
 	}
 
-	// 创建带超时的context
-	engineCtx, engineCancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer engineCancel()
+	// 使用独立context初始化引擎，避免引擎初始化（含坏模板二分查找）
+	// 消耗扫描超时预算。引擎初始化最长允许5分钟。
+	initCtx, initCancel := context.WithTimeout(context.Background(), 300*time.Second)
+	defer initCancel()
 
 	// 消除双重引擎初始化，调用一次即可构建并加载好引擎
 	taskLog("INFO", "Initializing Nuclei engine (1-pass)...")
 	ne, customTemplatePaths, templateMetas, err := s.buildAndLoadEngine(
-		engineCtx, customTemplatePaths, templateMetas, opts, len(targets), taskLog,
+		initCtx, customTemplatePaths, templateMetas, opts, len(targets), taskLog,
 	)
 	if err != nil {
 		taskLog("ERROR", "Failed to construct running nuclei engine: %v", err)
@@ -489,6 +495,11 @@ func (s *NucleiScanner) ScanBatch(ctx context.Context, targets []string, opts *N
 	// 批量加载所有目标
 	taskLog("INFO", "Loading %d targets...", len(targets))
 	ne.LoadTargets(targets, false)
+
+	// 引擎初始化完成，创建带超时的扫描context
+	// 此时开始计算扫描超时，确保初始化耗时不会侵蚀扫描时间
+	engineCtx, engineCancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer engineCancel()
 
 	// 统计变量
 	scannedCount := 0
@@ -509,7 +520,9 @@ func (s *NucleiScanner) ScanBatch(ctx context.Context, targets []string, opts *N
 	defer close(done)
 
 	// 执行扫描
-	taskLog("INFO", "Starting batch scan (timeout: %ds)...", timeout)
+	scanStartTime := time.Now()
+	initDuration := scanStartTime.Sub(startTime).Seconds()
+	taskLog("INFO", "Starting batch scan (timeout: %ds, engine init took %.1fs)...", timeout, initDuration)
 
 	totalWork := len(customTemplatePaths) * len(targets)
 	matcherStatusEnabled := totalWork <= 50_000
@@ -569,18 +582,19 @@ func (s *NucleiScanner) ScanBatch(ctx context.Context, targets []string, opts *N
 	})
 
 	elapsed := time.Since(startTime).Seconds()
+	scanElapsed := time.Since(scanStartTime).Seconds()
 
 	if err != nil {
 		if engineCtx.Err() == context.DeadlineExceeded {
-			taskLog("WARN", "Scan timeout after %.0fs", elapsed)
+			taskLog("WARN", "Scan timeout after %.0fs (scan: %.0fs)", elapsed, scanElapsed)
 		} else if engineCtx.Err() == context.Canceled {
-			taskLog("WARN", "Scan cancelled after %.0fs", elapsed)
+			taskLog("WARN", "Scan cancelled after %.0fs (scan: %.0fs)", elapsed, scanElapsed)
 		} else {
 			taskLog("ERROR", "Scan error: %v", err)
 		}
 	}
 
-	taskLog("INFO", "Batch scan completed: %d targets, %d vuls found, %.0fs", len(targets), foundCount, elapsed)
+	taskLog("INFO", "Batch scan completed: %d targets, %d vuls found, %.0fs (scan: %.0fs)", len(targets), foundCount, elapsed, scanElapsed)
 
 	return vuls, nil
 }
@@ -647,6 +661,9 @@ func (s *NucleiScanner) buildNucleiOptions(opts *NucleiOptions, customTemplatePa
 	} else {
 		logx.Infof("Large scan detected (%d templates x %d targets), disabling MatcherStatus to save CPU", len(customTemplatePaths), targetCount)
 	}
+
+	// 禁用自动更新检查，避免启动时下载模板
+	nucleiOpts = append(nucleiOpts, nuclei.DisableUpdateCheck())
 
 	// 判断是否有模板（从数据库获取的模板）
 	hasTemplates := len(customTemplatePaths) > 0
