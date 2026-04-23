@@ -223,11 +223,37 @@ func createAndPushCronTask(ctx context.Context, svcCtx *svc.ServiceContext, sche
 		enabledModules = 1
 	}
 
-	// 分批处理目标
-	batchSize := 50
+	// 自动计算最佳批次大小
+	// 子任务总数控制在 10~30 范围内，避免碎片化或过度聚合
+	const (
+		minSubTasks = 10
+		maxSubTasks = 30
+		minBatch   = 20
+		maxBatch   = 200
+	)
+	targetCount := len(validTargets)
+	optimalBatches := (minSubTasks + maxSubTasks) / 2 / enabledModules
+	if optimalBatches < 1 {
+		optimalBatches = 1
+	}
+	batchSize := targetCount / optimalBatches
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	if batchSize < minBatch {
+		batchSize = minBatch
+	}
+	if batchSize > maxBatch {
+		batchSize = maxBatch
+	}
+	if targetCount <= minBatch {
+		batchSize = targetCount
+	}
+	// 如果用户显式设置了 batchSize > 0，优先使用
 	if bs, ok := taskConfig["batchSize"].(float64); ok && bs > 0 {
 		batchSize = int(bs)
 	}
+	logx.Infof("Cron task %s: auto-calculated batchSize=%d (targets=%d, modules=%d)", newTaskId, batchSize, targetCount, enabledModules)
 
 	var batches []string
 	for i := 0; i < len(validTargets); i += batchSize {
