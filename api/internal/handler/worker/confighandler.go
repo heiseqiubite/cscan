@@ -744,3 +744,98 @@ func WorkerConfigSubdomainDictHandler(svcCtx *svc.ServiceContext) http.HandlerFu
 		})
 	}
 }
+
+// ==================== Weakpass Dict Config Types ====================
+
+// WorkerWeakpassDictReq 弱口令字典获取请求
+type WorkerWeakpassDictReq struct {
+	DictIds []string   `json:"dictIds"` // 字典ID列表
+	Services []string  `json:"services"` // 目标服务列表（用于过滤）
+}
+
+// WorkerWeakpassDictItem 弱口令字典项
+type WorkerWeakpassDictItem struct {
+	Id        string `json:"id"`
+	Name      string `json:"name"`
+	Service   string `json:"service"` // 服务类型
+	Content   string `json:"content"` // 字典内容（用户名:密码 格式）
+	WordCount int    `json:"wordCount"`
+}
+
+// WorkerWeakpassDictResp 弱口令字典获取响应
+type WorkerWeakpassDictResp struct {
+	Code  int                      `json:"code"`
+	Msg   string                  `json:"msg"`
+	Dicts []WorkerWeakpassDictItem `json:"dicts"`
+	Count int                      `json:"count"`
+}
+
+// ==================== Weakpass Dict Handler ====================
+
+// WorkerConfigWeakpassDictHandler 弱口令字典配置获取接口
+// POST /api/v1/worker/config/weakpassdict
+func WorkerConfigWeakpassDictHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req WorkerWeakpassDictReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpx.OkJson(w, &WorkerWeakpassDictResp{Code: 400, Msg: "参数解析失败"})
+			return
+		}
+
+		ctx := r.Context()
+		dictModel := model.NewWeakpassDictModel(svcCtx.MongoDB)
+
+		var dicts []model.WeakpassDict
+		var err error
+
+		if len(req.DictIds) > 0 {
+			// 优先按字典ID获取
+			dicts, err = dictModel.FindByIds(ctx, req.DictIds)
+		} else if len(req.Services) > 0 {
+			// 根据服务类型获取对应的字典
+			// 如果指定了服务，只返回匹配服务的字典和通用字典
+			var allDicts []model.WeakpassDict
+			allDicts, err = dictModel.FindEnabled(ctx, "")
+			if err == nil {
+				// 过滤出匹配服务的字典
+				serviceSet := make(map[string]bool)
+				for _, svc := range req.Services {
+					serviceSet[svc] = true
+				}
+				for _, d := range allDicts {
+					if d.Service == "common" || serviceSet[d.Service] {
+						dicts = append(dicts, d)
+					}
+				}
+			}
+		} else {
+			// 没有指定字典ID和服务，返回所有启用的字典
+			dicts, err = dictModel.FindEnabled(ctx, "")
+		}
+
+		if err != nil {
+			logx.Errorf("[WorkerConfigWeakpassDict] Find error: %v", err)
+			httpx.OkJson(w, &WorkerWeakpassDictResp{Code: 500, Msg: "获取字典失败"})
+			return
+		}
+
+		// 转换数据
+		items := make([]WorkerWeakpassDictItem, 0, len(dicts))
+		for _, d := range dicts {
+			items = append(items, WorkerWeakpassDictItem{
+				Id:        d.Id.Hex(),
+				Name:      d.Name,
+				Service:   d.Service,
+				Content:   d.Content,
+				WordCount: d.WordCount,
+			})
+		}
+
+		httpx.OkJson(w, &WorkerWeakpassDictResp{
+			Code:  0,
+			Msg:   "success",
+			Dicts: items,
+			Count: len(items),
+		})
+	}
+}

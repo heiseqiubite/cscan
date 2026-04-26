@@ -2050,6 +2050,146 @@ type SubdomainDictSimple struct {
 	IsBuiltin bool   `json:"isBuiltin"`
 }
 
+// ==================== 弱口令字典 ====================
+
+// WeakpassDict 弱口令字典 - 使用 "用户名:密码" 格式
+type WeakpassDict struct {
+	Id          string `json:"id"`
+	Name        string `json:"name"`             // 字典名称
+	Description string `json:"description"`     // 描述
+	Service     string `json:"service"`         // 服务类型：ssh/ftp/mysql/.../common
+	Content     string `json:"content"`         // 字典内容（每行一个 "用户名:密码"）
+	WordCount   int    `json:"wordCount"`       // 词条数量（用户名:密码组合数）
+	Enabled     bool   `json:"enabled"`         // 是否启用
+	IsBuiltin   bool   `json:"isBuiltin"`       // 是否内置字典
+	CreateTime  string `json:"createTime"`
+	UpdateTime  string `json:"updateTime"`
+}
+
+// WeakpassDictListReq 弱口令字典列表请求
+type WeakpassDictListReq struct {
+	Page     int    `json:"page,default=1"`
+	PageSize int    `json:"pageSize,default=20"`
+	Service  string `json:"service,optional"`  // 服务类型筛选
+	Name     string `json:"name,optional"`    // 名称筛选
+	Enabled  *bool  `json:"enabled,optional"` // 状态筛选
+}
+
+// WeakpassDictListResp 弱口令字典列表响应
+type WeakpassDictListResp struct {
+	Code  int            `json:"code"`
+	Msg   string         `json:"msg"`
+	Total int            `json:"total"`
+	List  []WeakpassDict `json:"list"`
+}
+
+// WeakpassDictSaveReq 保存弱口令字典请求
+type WeakpassDictSaveReq struct {
+	Id          string `json:"id,optional"`
+	Name        string `json:"name"`
+	Description string `json:"description,optional"`
+	Service     string `json:"service"` // 服务类型：ssh/ftp/mysql/.../common
+	Content     string `json:"content"` // 字典内容（每行一个 "用户名:密码"）
+	Enabled     bool   `json:"enabled"`
+}
+
+// WeakpassDictDeleteReq 删除弱口令字典请求
+type WeakpassDictDeleteReq struct {
+	Id string `json:"id"`
+}
+
+// WeakpassDictClearResp 清空弱口令字典响应
+type WeakpassDictClearResp struct {
+	Code    int    `json:"code"`
+	Msg     string `json:"msg"`
+	Deleted int    `json:"deleted"` // 删除数量
+}
+
+// WeakpassDictEnabledListResp 启用的弱口令字典列表响应（用于任务创建时选择）
+type WeakpassDictEnabledListResp struct {
+	Code int                    `json:"code"`
+	Msg  string                 `json:"msg"`
+	List []WeakpassDictSimple   `json:"list"`
+}
+
+// WeakpassDictSimple 简化的弱口令字典信息（用于选择列表）
+type WeakpassDictSimple struct {
+	Id        string `json:"id"`
+	Name      string `json:"name"`
+	Service   string `json:"service"`
+	WordCount int    `json:"wordCount"`
+	IsBuiltin bool   `json:"isBuiltin"`
+}
+
+// WeakpassDictImportReq 导入弱口令字典请求
+type WeakpassDictImportReq struct {
+	Content   string `json:"content"`   // 字典内容（每行一个 "用户名:密码" 或服务分组格式）
+	Format    string `json:"format"`   // 格式: auto（自动检测）, simple（简单格式：用户:密码，每行一个）, grouped（分组格式：[service]\nuser:pass）
+	Name      string `json:"name"`     // 字典名称（可选，用于单字典导入）
+	Service   string `json:"service"`   // 服务类型（可选）
+	MergeSame bool   `json:"mergeSame"` // 是否合并相同名称的字典
+}
+
+// WeakpassDictImportResp 导入弱口令字典响应
+type WeakpassDictImportResp struct {
+	Code      int    `json:"code"`
+	Msg       string `json:"msg"`
+	Imported  int    `json:"imported"`  // 导入数量
+	Updated   int    `json:"updated"`  // 更新数量
+	Skipped   int    `json:"skipped"`  // 跳过数量
+	Errors    []string `json:"errors"` // 错误信息列表
+}
+
+// WeakpassDictExportReq 导出弱口令字典请求
+type WeakpassDictExportReq struct {
+	Ids      []string `json:"ids"`       // 要导出的字典ID列表，为空则导出全部
+	Format   string   `json:"format"`   // 导出格式: simple（默认：用户:密码），grouped（分组格式），merged（合并为一个字典）
+	Name     string   `json:"name"`     // 导出后的字典名称（仅用于单字典导出或merged格式）
+}
+
+// WeakpassDictExportResp 导出弱口令字典响应
+type WeakpassDictExportResp struct {
+	Code    int    `json:"code"`
+	Msg     string `json:"msg"`
+	Content string `json:"content"` // 导出的字典内容
+}
+
+// WeakpassDictServiceStatsResp 服务类型统计响应
+type WeakpassDictServiceStatsResp struct {
+	Code  int                   `json:"code"`
+	Msg   string                `json:"msg"`
+	Stats []WeakpassDictServiceStat `json:"stats"`
+}
+
+type WeakpassDictServiceStat struct {
+	Service  string `json:"service"`
+	DictCount int    `json:"dictCount"`  // 字典数量
+	WordCount int    `json:"wordCount"` // 总词条数
+}
+
+// WeakpassDictParseReq 解析字典内容请求（预览用）
+type WeakpassDictParseReq struct {
+	Content string `json:"content"` // 字典内容
+	Format  string `json:"format"`  // 格式: auto, simple, grouped
+}
+
+// WeakpassDictParseResp 解析字典内容响应
+type WeakpassDictParseResp struct {
+	Code        int                    `json:"code"`
+	Msg         string                 `json:"msg"`
+	TotalLines  int                    `json:"totalLines"`   // 总行数
+	ValidLines  int                    `json:"validLines"`   // 有效行数
+	EmptyLines  int                    `json:"emptyLines"`   // 空行数
+	CommentLines int                   `json:"commentLines"` // 注释行数
+	Groups      []WeakpassDictGroup    `json:"groups"`       // 解析出的分组
+}
+
+type WeakpassDictGroup struct {
+	Service    string `json:"service"`    // 服务名称（通用为common）
+	LineCount  int    `json:"lineCount"`  // 该服务的词条数
+	Preview    []string `json:"preview"`  // 前5条预览
+}
+
 // ==================== 通知配置 ====================
 
 // NotifyConfig 通知配置
