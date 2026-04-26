@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -329,6 +330,14 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 
 // handleControlSignal 处理控制信号
 func (w *Worker) handleControlSignal(taskId, action string) {
+	// 检查信号是否已存在，避免重复处理（防止日志刷屏）
+	if existingAction, loaded := w.taskControlSignals.Load(taskId); loaded {
+		if existingAction == action {
+			// 信号已存在且值相同，跳过
+			return
+		}
+	}
+
 	w.logger.Info("Received control signal: taskId=%s, action=%s", taskId, action)
 
 	// 存储控制信号
@@ -338,6 +347,13 @@ func (w *Worker) handleControlSignal(taskId, action string) {
 	// 如果是STOP或PAUSE信号，也存储到主任务ID
 	mainTaskId := getMainTaskId(taskId)
 	if mainTaskId != taskId {
+		// 检查主任务ID的信号是否已存在
+		if existingAction, loaded := w.taskControlSignals.Load(mainTaskId); loaded {
+			if existingAction == action {
+				// 主任务信号已存在且值相同，跳过
+				return
+			}
+		}
 		w.taskControlSignals.Store(mainTaskId, action)
 		w.logger.Info("Also stored control signal for main task %s: %s", mainTaskId, action)
 	}
@@ -467,6 +483,7 @@ func (w *Worker) registerScanners() {
 	w.scanners["nuclei"] = scanner.NewNucleiScanner()
 	w.scanners["urlfinder"] = scanner.NewURLFinderScanner()
 	w.scanners["ffuf"] = scanner.NewFFufScanner()
+	w.scanners["brutescan"] = scanner.NewBruteScanScanner()
 }
 
 // Start 启动Worker
@@ -1164,6 +1181,17 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 		}
 	} else {
 		configDetails = append(configDetails, "Fingerprint=nil")
+	}
+
+	if config.BruteScan != nil {
+		configDetails = append(configDetails, fmt.Sprintf("BruteScan.Enable=%v", config.BruteScan.Enable))
+		if config.BruteScan.Enable {
+			enabledPhases = append(enabledPhases, "Brute Scan")
+			w.taskLog(task.TaskId, LevelInfo, "BruteScan config: services=%v, threads=%d, timeout=%d, dictIds=%v",
+				config.BruteScan.Services, config.BruteScan.Threads, config.BruteScan.Timeout, config.BruteScan.WeakpassDictIds)
+		}
+	} else {
+		configDetails = append(configDetails, "BruteScan=nil")
 	}
 
 	if config.DirScan != nil {
@@ -1921,7 +1949,55 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 		return
 	}
 
-	// 执行目录扫描（在指纹识别之后、POC扫描之前）
+	// 执行弱口令扫描（在指纹识别之后、目录扫描之前）
+	if config.BruteScan != nil && config.BruteScan.Enable && !completedPhases["brutescan"] {
+		w.taskLog(task.TaskId, LevelInfo, "Brute scan: starting, total assets=%d, forceScan=%v, services=%v", len(allAssets), config.BruteScan.ForceScan, config.BruteScan.Services)
+		
+		// 强制扫描模式：没有资产时从用户输入目标生成资产
+		// 注意：如果目标携带端口（如 192.168.1.215:63791），会保留该端口进行扫描
+		if len(allAssets) == 0 && target != "" && config.BruteScan.ForceScan {
+			generatedAssets := w.generateBruteAssetsFromTargets(target, config.BruteScan.Services)
+			generatedAssets = filterSkippedHostsAssets(generatedAssets, skippedHosts)
+			if len(generatedAssets) > 0 {
+				allAssets = append(allAssets, generatedAssets...)
+				w.taskLog(task.TaskId, LevelInfo, "Brute scan: generated %d assets from target (force scan), services=%v", len(generatedAssets), config.BruteScan.Services)
+				// 打印生成的资产详情
+				for _, asset := range generatedAssets {
+					w.taskLog(task.TaskId, LevelInfo, "Brute scan: generated asset: %s:%d (%s)", asset.Host, asset.Port, asset.Service)
+				}
+			}
+		}
+
+		// 仍然没有资产时跳过
+		if len(allAssets) == 0 {
+			w.taskLog(task.TaskId, LevelInfo, "Brute scan: skipped (no assets)")
+			completedPhases["brutescan"] = true
+			w.incrSubTaskDone(ctx, task, "弱口令扫描")
+		} else {
+			// 检查控制信号
+			if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
+				return
+			}
+
+			// 更新当前阶段
+			w.updateTaskProgressWithPhase(ctx, task.TaskId, 65, "弱口令扫描中", "弱口令扫描")
+
+			// 执行弱口令扫描
+			bruteVulns := w.executeBruteScan(ctx, task, allAssets, config.BruteScan, orgId)
+			if len(bruteVulns) > 0 {
+				w.taskLog(task.TaskId, LevelInfo, "Brute scan completed: found %d weak passwords", len(bruteVulns))
+			}
+			completedPhases["brutescan"] = true
+			w.incrSubTaskDone(ctx, task, "弱口令扫描")
+		}
+	}
+
+	// 检查控制信号
+	if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
+		return
+	}
+
+	// 执行目录扫描（在弱口令扫描之后、POC扫描之前）
 	if config.DirScan != nil && config.DirScan.Enable && !completedPhases["dirscan"] {
 		// 强制扫描模式：没有资产时从用户输入目标生成资产
 		if len(allAssets) == 0 && target != "" && config.DirScan.ForceScan {
@@ -2006,7 +2082,6 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 
 				// 从数据库获取模板（所有模板都存储在数据库中）
 				var templates []string
-				var autoTags []string
 
 				// 检查是否有模板ID列表（任务创建时已筛选好的模板）
 				if len(config.PocScan.NucleiTemplateIds) > 0 || len(config.PocScan.CustomPocIds) > 0 {
@@ -2023,37 +2098,23 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 					templates = w.getAllCustomPocs(ctx, severities)
 					w.taskLog(task.TaskId, LevelInfo, "CustomPocOnly mode: loaded %d custom POC templates", len(templates))
 				} else {
-					// 没有预设的模板ID，根据自动扫描配置生成标签并获取模板
-					var matchInfos []TagMatchInfo
-					if config.PocScan.AutoScan || config.PocScan.AutomaticScan {
-						autoTags, matchInfos = w.generateAutoTags(allAssets, config.PocScan)
-						// 输出匹配信息日志
-						for _, info := range matchInfos {
-							sourceDesc := "自定义标签映射"
-							if info.Source == "builtin" {
-								sourceDesc = "内置映射"
-							}
-							w.taskLog(task.TaskId, LevelInfo, "Auto-scan matched: fingerprint [%s] -> tags %v (source: %s)", info.Fingerprint, info.Tags, sourceDesc)
-						}
-					}
+				// 优化：按资产分组，每组只加载相关的POC模板
+				// 当AutoScan或AutomaticScan启用时，按资产的指纹标签进行分组
+				var groups []*AssetGroup
+				if config.PocScan.AutoScan || config.PocScan.AutomaticScan {
+					groups = w.groupAssetsByTags(allAssets, config.PocScan)
 
-					if len(autoTags) > 0 {
-						// 有自动生成的标签，通过RPC获取符合标签的模板
-						severities := []string{}
-						if config.PocScan.Severity != "" {
-							severities = strings.Split(config.PocScan.Severity, ",")
-						}
-						w.taskLog(task.TaskId, LevelInfo, "POC template auto selection: tags=%v", autoTags)
-						templates = w.getTemplatesByTags(ctx, autoTags, severities)
-						w.taskLog(task.TaskId, LevelInfo, "Loaded %d POC templates", len(templates))
-					} else {
-						// 没有模板ID也没有自动标签，记录警告
-						w.taskLog(task.TaskId, LevelWarn, "No POC templates configured, skipping POC scan")
+					// 输出分组信息日志
+					for _, group := range groups {
+						w.taskLog(task.TaskId, LevelInfo, "Auto-scan group: tags=%v, assets=%d", group.Tags, len(group.Assets))
 					}
 				}
 
-				// 只有在有模板时才执行扫描
-				if len(templates) > 0 {
+				if len(groups) == 0 {
+					w.taskLog(task.TaskId, LevelWarn, "No POC templates configured (no tags matched), skipping POC scan")
+				} else {
+					w.taskLog(task.TaskId, LevelInfo, "POC template auto selection: %d asset groups", len(groups))
+
 					// 用于统计漏洞数量
 					var vulCount int
 
@@ -2080,22 +2141,26 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 					if pocTimeout < 60 {
 						pocTimeout = 60
 					}
-					// 设置总超时上限，避免单批次POC扫描阻塞过久
-					// 最大不超过1800秒（30分钟），超时后返回已有结果
-					maxPocTimeout := 1800
+					// 按分组数量动态调整超时上限：分组越多，每个分组扫描的模板越少，总耗时越短
+					// 基线：1组时最多30分钟；分组越多，上限适当放宽以应对网络波动
+					baseTimeout := 1800   // 1组时的基线（30分钟）
+					maxPocTimeout := baseTimeout + len(groups)*300 // 每组增加5分钟
+					if maxPocTimeout > 7200 {
+						maxPocTimeout = 7200 // 最多2小时
+					}
 					if pocTimeout > maxPocTimeout {
-						w.taskLog(task.TaskId, LevelInfo, "POC scan: timeout capped from %ds to %ds", pocTimeout, maxPocTimeout)
+						w.taskLog(task.TaskId, LevelInfo, "POC scan: timeout capped from %ds to %ds (groups=%d)", pocTimeout, maxPocTimeout, len(groups))
 						pocTimeout = maxPocTimeout
 					}
-					w.taskLog(task.TaskId, LevelInfo, "POC scan: total timeout=%ds (single=%ds, assets=%d, concurrency=%d)",
-						pocTimeout, targetTimeout, len(allAssets), pocConcurrency)
+					w.taskLog(task.TaskId, LevelInfo, "POC scan: total timeout=%ds (single=%ds, assets=%d, concurrency=%d, groups=%d)",
+						pocTimeout, targetTimeout, len(allAssets), pocConcurrency, len(groups))
 					pocCtx, pocCancel := context.WithTimeout(ctx, time.Duration(pocTimeout)*time.Second)
 
 					// 启动后台刷新协程
 					flushDone := make(chan struct{})
 					go func() {
 						defer close(flushDone)
-						ticker := time.NewTicker(5 * time.Second) // 5秒也刷新一次
+						ticker := time.NewTicker(5 * time.Second)
 						defer ticker.Stop()
 						for {
 							select {
@@ -2115,48 +2180,69 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 						}
 					}()
 
-					// 构建Nuclei扫描选项，设置回调函数批量保存漏洞
-					taskIdForCallback := task.TaskId // 捕获taskId用于回调
-
-					nucleiOpts := &scanner.NucleiOptions{
-						Severity:        config.PocScan.Severity,
-						Tags:            autoTags,
-						ExcludeTags:     config.PocScan.ExcludeTags,
-						RateLimit:       config.PocScan.RateLimit,
-						Concurrency:     config.PocScan.Concurrency,
-						Timeout:         pocTimeout,
-						TargetTimeout:   targetTimeout,
-						AutoScan:        false, // 标签已在Worker端生成
-						AutomaticScan:   false,
-						CustomPocOnly:   config.PocScan.CustomPocOnly,
-						CustomTemplates: templates,
-						TagMappings:     config.PocScan.TagMappings,
-						CustomHeaders:   config.PocScan.CustomHeaders,
-						// 设置回调函数，发现漏洞时添加到缓冲区
-						OnVulnerabilityFound: func(vul *scanner.Vulnerability) {
-							vulCount++
-							w.taskLog(taskIdForCallback, LevelInfo, "Vulnerability found: %s → %s", vul.PocFile, vul.Url)
-							vulBuffer.Add(vul)
-						},
-					}
-					// 设置默认
-					if nucleiOpts.RateLimit == 0 {
-						nucleiOpts.RateLimit = 150
-					}
-					if nucleiOpts.Concurrency == 0 {
-						nucleiOpts.Concurrency = 25
+					// 遍历每个分组进行扫描
+					taskIdForCallback := task.TaskId
+					severities := []string{}
+					if config.PocScan.Severity != "" {
+						severities = strings.Split(config.PocScan.Severity, ",")
 					}
 
-					// 创建任务日志回调
-					pocTaskLogger := func(level, format string, args ...interface{}) {
-						w.taskLog(task.TaskId, level, format, args...)
+					for _, group := range groups {
+						groupTemplates := w.getTemplatesByTags(ctx, group.Tags, severities)
+						if len(groupTemplates) == 0 {
+							w.taskLog(task.TaskId, LevelInfo, "Group (tags=%v): no templates loaded, skipping", group.Tags)
+							continue
+						}
+						w.taskLog(task.TaskId, LevelInfo, "Group (tags=%v, assets=%d): loaded %d templates", group.Tags, len(group.Assets), len(groupTemplates))
+
+						// 构建该分组的扫描选项
+						groupOpts := &scanner.NucleiOptions{
+							Severity:        config.PocScan.Severity,
+							Tags:            group.Tags,
+							ExcludeTags:     config.PocScan.ExcludeTags,
+							RateLimit:       config.PocScan.RateLimit,
+							Concurrency:     config.PocScan.Concurrency,
+							Timeout:         pocTimeout,
+							TargetTimeout:   targetTimeout,
+							AutoScan:        false,
+							AutomaticScan:   false,
+							CustomPocOnly:   false,
+							CustomTemplates: groupTemplates,
+							TagMappings:     nil,
+							CustomHeaders:   config.PocScan.CustomHeaders,
+							OnVulnerabilityFound: func(vul *scanner.Vulnerability) {
+								vulCount++
+								w.taskLog(taskIdForCallback, LevelInfo, "Vulnerability found: %s → %s", vul.PocFile, vul.Url)
+								vulBuffer.Add(vul)
+							},
+						}
+						if groupOpts.RateLimit == 0 {
+							groupOpts.RateLimit = 150
+						}
+						if groupOpts.Concurrency == 0 {
+							groupOpts.Concurrency = 25
+						}
+
+						// 创建任务日志回调
+						pocTaskLogger := func(level, format string, args ...interface{}) {
+							w.taskLog(task.TaskId, level, format, args...)
+						}
+
+						// 扫描该分组的资产
+						result, err := s.Scan(pocCtx, &scanner.ScanConfig{
+							Assets:     group.Assets,
+							Options:    groupOpts,
+							TaskLogger: pocTaskLogger,
+						})
+
+						if err != nil {
+							w.taskLog(task.TaskId, LevelError, "POC scan error (group tags=%v): %v", group.Tags, err)
+						}
+						if result != nil {
+							allVuls = append(allVuls, result.Vulnerabilities...)
+						}
 					}
 
-					result, err := s.Scan(pocCtx, &scanner.ScanConfig{
-						Assets:     allAssets,
-						Options:    nucleiOpts,
-						TaskLogger: pocTaskLogger,
-					})
 					pocCancel()
 
 					// 扫描完成后，刷新剩余的漏洞
@@ -2164,27 +2250,11 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 						w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, vuls)
 					})
 
-					// 检查是否超时
-					if pocCtx.Err() == context.DeadlineExceeded {
-						w.taskLog(task.TaskId, LevelWarn, "POC scan timeout after %ds, continuing with partial results", pocTimeout)
-					}
-
-					// 检查是否被停止
-					if ctx.Err() != nil || w.checkTaskControl(ctx, task.TaskId) == "STOP" {
-						w.taskLog(task.TaskId, LevelInfo, "Task stopped")
-						return
-					}
-
-					if err != nil {
-						w.taskLog(task.TaskId, LevelError, "POC scan error: %v", err)
-					}
-					if result != nil {
-						allVuls = append(allVuls, result.Vulnerabilities...)
-						if vulCount > 0 {
-							w.taskLog(task.TaskId, LevelInfo, "POC scan completed: found %d vulnerabilities", vulCount)
-						}
+					if vulCount > 0 {
+						w.taskLog(task.TaskId, LevelInfo, "POC scan completed: found %d vulnerabilities", vulCount)
 					}
 				}
+				} // 结束 POC 模板选择的 else 分支
 			}
 			// POC扫描模块完成，递增子任务进度
 			w.incrSubTaskDone(ctx, task, "漏洞扫描")
@@ -2201,15 +2271,13 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 }
 
 // updateTaskStatus 更新任务状态
-func (w *Worker) updateTaskStatus(ctx context.Context, taskId, status, result string) {
+func (w *Worker) updateTaskStatus(ctx context.Context, taskId string, status string, result string) {
 	// 如果任务完成（SUCCESS/FAILURE），同时更新进度
+	progress := 0
 	if status == scheduler.TaskStatusSuccess || status == scheduler.TaskStatusFailure {
-		progress := 100
-		if status == scheduler.TaskStatusFailure {
-			progress = 0 // 失败时进度设为0
-		}
-		w.updateTaskProgressWithPhase(ctx, taskId, progress, result, "完成")
+		progress = 100
 	}
+	w.updateTaskProgressWithPhase(ctx, taskId, progress, result, "完成")
 
 	// 通过 HTTP 接口更新任务状态
 	_, err := w.httpClient.UpdateTask(ctx, &TaskUpdateReq{
@@ -2847,6 +2915,83 @@ func (w *Worker) generateAutoTags(assets []*scanner.Asset, pocConfig *scheduler.
 	return tags, matchInfos
 }
 
+// AssetGroup 资产组，具有相同标签集的资产归为一组
+type AssetGroup struct {
+	Assets []*scanner.Asset
+	Tags   []string
+}
+
+// generateAssetTags 为单个资产生成标签（基于自定义标签映射和Wappalyzer映射）
+func (w *Worker) generateAssetTags(asset *scanner.Asset, pocConfig *scheduler.PocScanConfig) []string {
+	tagSet := make(map[string]bool)
+
+	for _, app := range asset.App {
+		appName := parseAppName(app)
+		appNameLower := strings.ToLower(appName)
+
+		// 模式1: 基于自定义标签映射
+		if pocConfig.AutoScan && pocConfig.TagMappings != nil {
+			for mappedApp, tags := range pocConfig.TagMappings {
+				if strings.ToLower(mappedApp) == appNameLower {
+					for _, tag := range tags {
+						tagSet[tag] = true
+					}
+					break
+				}
+			}
+		}
+
+		// 模式2: 基于Wappalyzer内置映射
+		if pocConfig.AutomaticScan {
+			if tags, ok := mapping.WappalyzerNucleiMapping[appNameLower]; ok {
+				for _, tag := range tags {
+					tagSet[tag] = true
+				}
+			}
+		}
+	}
+
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
+	}
+	return tags
+}
+
+// groupAssetsByTags 按标签集对资产进行分组
+// 具有相同标签集的资产归为同一组，可以共享同一套POC模板
+func (w *Worker) groupAssetsByTags(assets []*scanner.Asset, pocConfig *scheduler.PocScanConfig) []*AssetGroup {
+	// 使用标签集的签名作为key进行分组
+	groups := make(map[string]*AssetGroup)
+
+	for _, asset := range assets {
+		tags := w.generateAssetTags(asset, pocConfig)
+		if len(tags) == 0 {
+			continue
+		}
+
+		// 创建标签集的签名（排序后拼接）
+		sortedTags := make([]string, len(tags))
+		copy(sortedTags, tags)
+		sort.Strings(sortedTags)
+		sig := strings.Join(sortedTags, ",")
+
+		if _, ok := groups[sig]; !ok {
+			groups[sig] = &AssetGroup{
+				Assets: make([]*scanner.Asset, 0),
+				Tags:   tags,
+			}
+		}
+		groups[sig].Assets = append(groups[sig].Assets, asset)
+	}
+
+	result := make([]*AssetGroup, 0, len(groups))
+	for _, group := range groups {
+		result = append(result, group)
+	}
+	return result
+}
+
 // getTemplatesByTags 通过 HTTP 接口从数据库获取符合标签的模板
 func (w *Worker) getTemplatesByTags(ctx context.Context, tags []string, severities []string) []string {
 	if len(tags) == 0 {
@@ -3077,6 +3222,130 @@ func filterSkippedHostsAssets(assets []*scanner.Asset, skippedHosts []string) []
 		}
 	}
 	return result
+}
+
+// generateBruteAssetsFromTargets 从目标生成弱口令扫描资产
+// 用于强制扫描模式：
+// - 如果目标携带端口（如 192.168.1.215:63791），保留该端口进行扫描
+// - 如果目标没有端口，为指定服务生成默认端口资产
+func (w *Worker) generateBruteAssetsFromTargets(target string, services []string) []*scanner.Asset {
+	var assets []*scanner.Asset
+
+	// 服务默认端口映射
+	servicePorts := map[string]int{
+		"ssh":        22,
+		"mysql":      3306,
+		"redis":      6379,
+		"mongodb":    27017,
+		"postgresql": 5432,
+		"mssql":      1433,
+		"ftp":        21,
+		"snmp":       161,
+		"oracle":     1521,
+		"smb":        445,
+		"mqtt":       1883,
+	}
+
+	// 端口到服务的反向映射
+	portToService := map[int]string{
+		22:    "ssh",
+		3306:  "mysql",
+		6379:  "redis",
+		27017: "mongodb",
+		5432:  "postgresql",
+		1433:  "mssql",
+		21:    "ftp",
+		161:   "snmp",
+		1521:  "oracle",
+		445:   "smb",
+		1883:  "mqtt",
+	}
+
+	// 解析目标，生成临时资产
+	tempAssets := scanner.GenerateAssetsFromTargetsWithoutDNS(target)
+	if len(tempAssets) == 0 {
+		return assets
+	}
+
+	// 确定目标服务列表
+	var targetServices []string
+	if len(services) > 0 {
+		targetServices = services
+	} else {
+		// 如果没有指定服务，使用所有已知服务
+		for svc := range servicePorts {
+			targetServices = append(targetServices, svc)
+		}
+	}
+	
+	// 转换为集合便于查找
+	targetServiceSet := make(map[string]bool)
+	for _, svc := range targetServices {
+		targetServiceSet[svc] = true
+	}
+
+	// 按主机分组处理，避免重复
+	hostAssets := make(map[string][]*scanner.Asset)
+
+	for _, tempAsset := range tempAssets {
+		host := tempAsset.Host
+
+		// 检查是否已处理过该主机
+		if _, exists := hostAssets[host]; exists {
+			continue
+		}
+
+		// 如果目标有明确端口（用户指定了端口）
+		if tempAsset.Port > 0 {
+			// 根据端口识别服务
+			if svc, ok := portToService[tempAsset.Port]; ok {
+				// 检查该服务是否在目标列表中
+				if targetServiceSet[svc] {
+					asset := &scanner.Asset{
+						Host:    host,
+						Port:    tempAsset.Port, // 使用用户指定的端口
+						Service: svc,
+						IsHTTP:  false,
+					}
+					hostAssets[host] = append(hostAssets[host], asset)
+				}
+			} else {
+				// 端口没有匹配到已知服务，但用户明确指定了端口
+				// 为所有目标服务生成资产，但保留用户指定的端口
+				for _, svc := range targetServices {
+					asset := &scanner.Asset{
+						Host:    host,
+						Port:    tempAsset.Port, // 保留用户指定的端口
+						Service: svc,
+						IsHTTP:  false,
+					}
+					hostAssets[host] = append(hostAssets[host], asset)
+				}
+			}
+		} else {
+			// 没有指定端口，为所有目标服务生成默认端口资产
+			for _, svc := range targetServices {
+				port, ok := servicePorts[svc]
+				if !ok {
+					continue
+				}
+				asset := &scanner.Asset{
+					Host:    host,
+					Port:    port,
+					Service: svc,
+					IsHTTP:  false,
+				}
+				hostAssets[host] = append(hostAssets[host], asset)
+			}
+		}
+	}
+
+	// 合并所有资产
+	for _, hostAssetList := range hostAssets {
+		assets = append(assets, hostAssetList...)
+	}
+
+	return assets
 }
 
 // executePocValidateTask 执行POC验证任务
@@ -3823,6 +4092,192 @@ func (w *Worker) executePortIdentifyWithFingerprintx(ctx context.Context, task *
 
 	w.taskLog(task.TaskId, LevelInfo, "Port identify completed: %d assets", len(result.Assets))
 	return result.Assets
+}
+
+// executeBruteScan 执行弱口令扫描阶段
+func (w *Worker) executeBruteScan(ctx context.Context, task *scheduler.TaskInfo, assets []*scanner.Asset, config *scheduler.BruteScanConfig, orgId string) []*scanner.Vulnerability {
+	// 添加 panic 恢复机制
+	defer func() {
+		if r := recover(); r != nil {
+			w.taskLog(task.TaskId, LevelError, "Brute scan panic recovered: %v, stack: %s", r, string(getStackTrace()))
+		}
+	}()
+
+	// 过滤出可爆破的资产（有明确服务识别的资产）
+	var bruteAssets []*scanner.Asset
+	
+	// 如果配置了服务列表，建立服务集合
+	serviceSet := make(map[string]bool)
+	hasServiceFilter := len(config.Services) > 0
+	if hasServiceFilter {
+		for _, svc := range config.Services {
+			serviceSet[svc] = true
+		}
+	}
+
+	for _, asset := range assets {
+		if asset.Service == "" {
+			continue
+		}
+		// 检查服务是否在目标列表中（只有配置了服务列表时才过滤）
+		if hasServiceFilter && !serviceSet[asset.Service] {
+			continue
+		}
+		bruteAssets = append(bruteAssets, asset)
+	}
+
+	if len(bruteAssets) == 0 {
+		w.taskLog(task.TaskId, LevelInfo, "Brute scan: skipped (no service assets)")
+		return nil
+	}
+
+	w.taskLog(task.TaskId, LevelInfo, "Brute scan: %d target assets, services=%v", len(bruteAssets), config.Services)
+
+	// 获取字典内容
+	// 字典格式是 user:password，需要拆分
+	var usernameDict, passwordDict string
+	usernameSet := make(map[string]struct{})
+	passwordSet := make(map[string]struct{})
+	
+	// 服务特定字典：service -> entries
+	serviceDicts := make(map[string][]scanner.ServiceDictEntry)
+
+	// 获取要使用的字典ID列表和目标服务列表
+	dictIds := config.WeakpassDictIds
+	targetServices := config.Services
+
+	// 获取字典内容（后端会根据服务类型过滤字典）
+	dictResp, err := w.httpClient.GetWeakpassDicts(ctx, dictIds, targetServices)
+	if err != nil {
+		w.taskLog(task.TaskId, LevelError, "Brute scan: get dicts failed: %v", err)
+		return nil
+	}
+
+	if len(dictResp.Dicts) > 0 {
+		for _, dict := range dictResp.Dicts {
+			// 获取字典的服务类型
+			serviceType := strings.ToLower(strings.TrimSpace(dict.Service))
+			if serviceType == "" {
+				serviceType = "common"
+			}
+			
+			// 解析 user:password 格式的字典内容
+			lines := strings.Split(dict.Content, "\n")
+			currentService := serviceType
+			
+		for _, line := range lines {
+			// 清理行尾的 \r（处理 Windows CRLF 格式）
+			line = strings.TrimRight(line, "\r")
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+				
+				// 检查是否是服务分组标记 [service]
+				if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+					currentService = strings.ToLower(strings.Trim(line, "[]"))
+					continue
+				}
+				
+				// 按冒号分割
+				parts := strings.SplitN(line, ":", 2)
+				username := ""
+				password := ""
+				if len(parts) >= 1 {
+					username = strings.TrimSpace(parts[0])
+				}
+				if len(parts) >= 2 {
+					password = strings.TrimSpace(parts[1])
+				}
+				
+				// 添加到通用集合
+				if username != "" {
+					usernameSet[username] = struct{}{}
+				}
+				if password != "" {
+					passwordSet[password] = struct{}{}
+				}
+				
+				// 添加到服务特定字典
+				if username != "" || password != "" {
+					entry := scanner.ServiceDictEntry{
+						Username: username,
+						Password: password,
+					}
+					serviceDicts[currentService] = append(serviceDicts[currentService], entry)
+				}
+			}
+		}
+		// 去重后合并到字符串
+		for u := range usernameSet {
+			usernameDict += u + "\n"
+		}
+		for p := range passwordSet {
+			passwordDict += p + "\n"
+		}
+		
+		// 统计服务字典信息
+		serviceDictInfo := make([]string, 0, len(serviceDicts))
+		for svc, entries := range serviceDicts {
+			serviceDictInfo = append(serviceDictInfo, fmt.Sprintf("%s(%d)", svc, len(entries)))
+		}
+		
+		w.taskLog(task.TaskId, LevelInfo, "Brute scan: using %d dicts, %d usernames, %d passwords, services: %v",
+			len(dictResp.Dicts), len(usernameSet), len(passwordSet), serviceDictInfo)
+	}
+
+	// 如果没有获取到字典内容且没有启用默认字典，跳过
+	if usernameDict == "" && passwordDict == "" && len(serviceDicts) == 0 && !config.UseDefaultDict {
+		w.taskLog(task.TaskId, LevelWarn, "Brute scan: no dicts configured")
+		return nil
+	}
+
+	// 构建扫描配置 - 使用 Worker 的并发数
+	bruteScanConfig := &scanner.BruteScanConfig{
+		Services:       config.Services,
+		Threads:        w.config.Concurrency, // 使用 Worker 并发数
+		Timeout:        config.Timeout,
+		DelayMs:        config.DelayMs,
+		UseDefaultDict: config.UseDefaultDict,
+		StopOnFirst:    config.StopOnFirst,
+		ForceScan:      config.ForceScan,
+		UsernameDict:   usernameDict,
+		PasswordDict:   passwordDict,
+		ServiceDicts:   serviceDicts,
+	}
+
+	// 构建扫描器配置
+	scanConfig := &scanner.ScanConfig{
+		Assets:      bruteAssets,
+		Options:     bruteScanConfig,
+		WorkspaceId: task.WorkspaceId,
+		MainTaskId:  task.MainTaskId,
+		TaskLogger: func(level, format string, args ...interface{}) {
+			w.taskLog(task.TaskId, level, format, args...)
+		},
+	}
+
+	// 获取 brutescan 扫描器
+	bruteScanner, ok := w.scanners["brutescan"]
+	if !ok {
+		w.taskLog(task.TaskId, LevelError, "Brute scan: brutescan scanner not found")
+		return nil
+	}
+
+	// 执行扫描
+	result, err := bruteScanner.Scan(ctx, scanConfig)
+	if err != nil {
+		w.taskLog(task.TaskId, LevelError, "Brute scan error: %v", err)
+		return nil
+	}
+
+	// 保存漏洞结果
+	if len(result.Vulnerabilities) > 0 {
+		w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, result.Vulnerabilities)
+		w.taskLog(task.TaskId, LevelInfo, "Brute scan: saved %d vulnerabilities", len(result.Vulnerabilities))
+	}
+
+	return result.Vulnerabilities
 }
 
 // executeDirScan 执行目录扫描阶段

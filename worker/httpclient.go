@@ -861,6 +861,52 @@ func (c *WorkerHTTPClient) GetSubdomainDicts(ctx context.Context, dictIds []stri
 	return &resp, nil
 }
 
+// ==================== Weakpass Dict ====================
+
+// WeakpassDictReq 弱口令字典获取请求
+type WeakpassDictReq struct {
+	DictIds   []string `json:"dictIds"`
+	Services  []string `json:"services"`  // 目标服务列表
+}
+
+// WeakpassDictItem 弱口令字典项
+type WeakpassDictItem struct {
+	Id        string `json:"id"`
+	Name      string `json:"name"`
+	Service   string `json:"service"`   // 服务类型
+	DictType  string `json:"dictType"`  // 字典类型：username 或 password
+	Content   string `json:"content"`  // 字典内容（每行一个）
+	WordCount int    `json:"wordCount"` // 词条数量
+}
+
+// WeakpassDictResp 弱口令字典获取响应
+type WeakpassDictResp struct {
+	Code  int                 `json:"code"`
+	Msg   string              `json:"msg"`
+	Dicts []WeakpassDictItem `json:"dicts"`
+	Count int                `json:"count"`
+}
+
+// GetWeakpassDicts 获取弱口令字典
+func (c *WorkerHTTPClient) GetWeakpassDicts(ctx context.Context, dictIds []string, services []string) (*WeakpassDictResp, error) {
+	req := &WeakpassDictReq{
+		DictIds:  dictIds,
+		Services: services,
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/api/v1/worker/config/weakpassdict", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp WeakpassDictResp
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal response failed: %w", err)
+	}
+
+	return &resp, nil
+}
+
 // ==================== Active Fingerprints ====================
 
 // ActiveFingerprintsReq 主动指纹获取请求

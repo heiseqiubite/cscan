@@ -19,6 +19,7 @@ const (
 	PhasePortScan     TaskPhase = "portscan"
 	PhasePortIdentify TaskPhase = "portidentify"
 	PhaseFingerprint  TaskPhase = "fingerprint"
+	PhaseBruteScan    TaskPhase = "brutescan"
 	PhaseDirScan      TaskPhase = "dirscan"
 	PhasePocScan      TaskPhase = "pocscan"
 )
@@ -38,9 +39,10 @@ var DefaultPhaseOrder = []PhaseConfig{
 	{Phase: PhaseDomainScan, Name: "子域名扫描", Scanner: "subfinder", ProgressStart: 10, ProgressEnd: 20, ContinueOnError: true},
 	{Phase: PhasePortScan, Name: "端口扫描", Scanner: "naabu", ProgressStart: 20, ProgressEnd: 40, ContinueOnError: true},
 	{Phase: PhasePortIdentify, Name: "端口识别", Scanner: "nmap/fingerprintx", ProgressStart: 40, ProgressEnd: 50, ContinueOnError: true},
-	{Phase: PhaseFingerprint, Name: "指纹识别", Scanner: "fingerprint", ProgressStart: 50, ProgressEnd: 70, ContinueOnError: true},
-	{Phase: PhaseDirScan, Name: "目录扫描", Scanner: "ffuf", ProgressStart: 70, ProgressEnd: 80, ContinueOnError: true},
-	{Phase: PhasePocScan, Name: "漏洞扫描", Scanner: "nuclei", ProgressStart: 80, ProgressEnd: 100, ContinueOnError: true},
+	{Phase: PhaseFingerprint, Name: "指纹识别", Scanner: "fingerprint", ProgressStart: 50, ProgressEnd: 65, ContinueOnError: true},
+	{Phase: PhaseBruteScan, Name: "弱口令扫描", Scanner: "brutescan", ProgressStart: 65, ProgressEnd: 75, ContinueOnError: true},
+	{Phase: PhaseDirScan, Name: "目录扫描", Scanner: "ffuf", ProgressStart: 75, ProgressEnd: 85, ContinueOnError: true},
+	{Phase: PhasePocScan, Name: "漏洞扫描", Scanner: "nuclei", ProgressStart: 85, ProgressEnd: 100, ContinueOnError: true},
 }
 
 // TaskRunner 任务执行器
@@ -356,6 +358,8 @@ func (r *TaskRunner) isPhaseEnabled(taskCtx *TaskContext, phase TaskPhase) bool 
 		return config.PortIdentify != nil && config.PortIdentify.Enable
 	case PhaseFingerprint:
 		return config.Fingerprint != nil && config.Fingerprint.Enable
+	case PhaseBruteScan:
+		return config.BruteScan != nil && config.BruteScan.Enable
 	case PhaseDirScan:
 		return config.DirScan != nil && config.DirScan.Enable
 	case PhasePocScan:
@@ -432,6 +436,8 @@ func (r *TaskRunner) getPhaseOptions(taskCtx *TaskContext, phase TaskPhase) inte
 		return config.PortIdentify
 	case PhaseFingerprint:
 		return config.Fingerprint
+	case PhaseBruteScan:
+		return config.BruteScan
 	case PhaseDirScan:
 		return config.DirScan
 	case PhasePocScan:
