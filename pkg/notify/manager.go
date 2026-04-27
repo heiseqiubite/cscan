@@ -51,6 +51,7 @@ func (f *HighRiskFilter) HasConditions() bool {
 func (m *NotifyManager) LoadConfigs(configs []ConfigItem) error {
 	m.notifier.ClearProviders()
 
+	var errs []string
 	for _, cfg := range configs {
 		if cfg.Status != "enable" {
 			continue
@@ -62,11 +63,16 @@ func (m *NotifyManager) LoadConfigs(configs []ConfigItem) error {
 		provider, err := CreateProvider(cfg.Provider, cfg.Config, messageTemplate)
 		if err != nil {
 			logx.Errorf("Failed to create notify provider %s: %v", cfg.Provider, err)
+			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Provider, err))
 			continue
 		}
 
 		m.notifier.AddProvider(provider)
 		logx.Infof("Loaded notify provider: %s", cfg.Provider)
+	}
+
+	if len(errs) > 0 && m.notifier.ProviderCount() == 0 {
+		return fmt.Errorf("all providers failed to load: %s", strings.Join(errs, "; "))
 	}
 
 	return nil
