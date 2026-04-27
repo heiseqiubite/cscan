@@ -603,7 +603,8 @@ const loadData = async () => {
         service: filters.value.service || '',
         iconHash: filters.value.iconHash || '',
         timeRange: 'all',
-        sortBy: 'time'
+        sortBy: 'time',
+        requireRecognitionOrShot: true
       }
       
       const res = await getAssetInventory(params)
