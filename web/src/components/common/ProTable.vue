@@ -362,7 +362,8 @@ async function loadStats() {
       ...searchForm }
     const res = await request.post(props.statApi, payload)
     if (res.code === 0) {
-      stats.value = res.data || res.stat || res || {}
+      // 处理嵌套的 data 包装情况
+      stats.value = res.data?.stat || res.data || res.stat || res || {}
     }
   } catch (error) {
     console.error('Failed to load stats:', error)
@@ -589,7 +590,9 @@ async function handleExport(command) {
       ...searchForm, page: 1, pageSize: 10000
       })
       if (res.code === 0) {
-        data = res.list || []
+        // 处理嵌套的 data 包装情况
+        const dataContainer = res.data?.list !== undefined ? res.data : res
+        data = dataContainer.list || []
       } else {
         ElMessage.error(t('common.getDataFailed') || 'Failed to get data')
         return
@@ -642,7 +645,7 @@ async function handleExport(command) {
 
     ElMessage.success(t('common.exportSuccess', { count: data.length }) || `Exported ${data.length} items`)
     return
-  } else {
+    } else {
     // Export All (TXT)
     ElMessage.info(t('common.gettingAllData') || 'Getting all data...')
     try {
@@ -651,7 +654,9 @@ async function handleExport(command) {
       ...searchForm, page: 1, pageSize: 10000
       })
       if (res.code === 0) {
-        data = res.list || []
+        // 处理嵌套的 data 包装情况
+        const dataContainer = res.data?.list !== undefined ? res.data : res
+        data = dataContainer.list || []
       } else {
         ElMessage.error(t('common.getDataFailed') || 'Failed to get data')
         return
