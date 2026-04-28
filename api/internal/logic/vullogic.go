@@ -123,18 +123,20 @@ func (l *VulListLogic) VulList(req *types.VulListReq, workspaceId string) (resp 
 	list := make([]types.Vul, 0, len(vuls))
 	for _, v := range vuls {
 		vul := types.Vul{
-			Id:         v.Id.Hex(),
-			Authority:  v.Authority,
-			Url:        v.Url,
-			PocFile:    v.PocFile,
-			Source:     v.Source,
-			Severity:   v.Severity,
-			Result:     v.Result,
-			VulName:    v.VulName,
-			Tags:       v.Tags,
-			CreateTime: v.CreateTime.Local().Format("2006-01-02 15:04:05"),
-			UpdateTime: v.UpdateTime.Local().Format("2006-01-02 15:04:05"),
-			ScanCount:  v.ScanCount,
+			Id:               v.Id.Hex(),
+			Authority:        v.Authority,
+			Url:              v.Url,
+			PocFile:          v.PocFile,
+			Source:           v.Source,
+			Severity:         v.Severity,
+			Result:           v.Result,
+			VulName:          v.VulName,
+			Tags:             v.Tags,
+			CreateTime:       v.CreateTime.Local().Format("2006-01-02 15:04:05"),
+			UpdateTime:       v.UpdateTime.Local().Format("2006-01-02 15:04:05"),
+			ScanCount:        v.ScanCount,
+			MatcherName:      v.MatcherName,
+			ExtractedResults: v.ExtractedResults,
 		}
 		// 新增字段 - 时间追踪
 		if !v.FirstSeenTime.IsZero() {
