@@ -466,7 +466,20 @@ type TaskConfig struct {
 	Fingerprint  *FingerprintConfig  `json:"fingerprint,omitempty"`
 	BruteScan    *BruteScanConfig    `json:"brutescan,omitempty"`  // 弱口令扫描
 	PocScan      *PocScanConfig      `json:"pocscan,omitempty"`
-	DirScan      *DirScanConfig      `json:"dirscan,omitempty"` // 目录扫描
+	DirScan      *DirScanConfig      `json:"dirscan,omitempty"`  // 目录扫描
+	JSFinder     *JSFinderConfig     `json:"jsfinder,omitempty"` // JS 敏感信息与未授权检测
+}
+
+// JSFinderConfig JSFinder 扫描配置
+// 4 个清单（高危路由 / 鉴权关键词 / 敏感数据关键词 / 域名黑名单）由 Worker 从 API 动态拉取，不在此结构中下发
+// EnableSourcemap / EnableUnauthCheck 使用指针：nil 表示"未显式设置"，Worker 侧默认视为 true；
+// &false 表示用户明确关闭。
+type JSFinderConfig struct {
+	Enable            bool  `json:"enable"`
+	Threads           int   `json:"threads,omitempty"`           // 并发线程数，默认 10
+	Timeout           int   `json:"timeout,omitempty"`           // 单个 HTTP 请求超时(秒)，默认 10
+	EnableSourcemap   *bool `json:"enableSourcemap,omitempty"`   // nil=默认启用；&false=明确关闭
+	EnableUnauthCheck *bool `json:"enableUnauthCheck,omitempty"` // nil=默认启用；&false=明确关闭
 }
 
 // BruteScanConfig 弱口令扫描配置
