@@ -93,6 +93,17 @@
         <DirScanView v-if="activeLeftTab === 'dirscan'" />
       </el-tab-pane>
 
+      <!-- JSFinder (JS敏感信息) -->
+      <el-tab-pane name="jsfinder">
+        <template #label>
+          <span class="left-tab-label">
+            <el-icon><Search /></el-icon>
+            {{ $t('asset.jsfinder') || 'JS发现' }}
+          </span>
+        </template>
+        <JSFinderView v-if="activeLeftTab === 'jsfinder'" />
+      </el-tab-pane>
+
       <!-- 漏洞风险 (Vuls) -->
       <el-tab-pane name="vul">
         <template #label>
@@ -113,7 +124,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Menu, List, Position, Connection,
-  Monitor, Folder, Warning, Cpu, CopyDocument
+  Monitor, Folder, Warning, Cpu, CopyDocument, Search
 } from '@element-plus/icons-vue'
 
 // 导入左侧标签页对应的各个组件
@@ -123,6 +134,7 @@ import DomainView from '@/components/asset/DomainView.vue'
 import IPView from '@/components/asset/IPView.vue'
 import SiteView from '@/components/asset/SiteView.vue'
 import DirScanView from '@/components/asset/DirScanView.vue'
+import JSFinderView from '@/components/asset/JSFinderView.vue'
 import VulView from '@/components/asset/VulView.vue'
 import IconView from '@/components/asset/IconView.vue'
 import AppView from '@/components/asset/AppView.vue'
