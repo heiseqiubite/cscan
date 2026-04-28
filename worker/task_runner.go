@@ -21,6 +21,7 @@ const (
 	PhaseFingerprint  TaskPhase = "fingerprint"
 	PhaseBruteScan    TaskPhase = "brutescan"
 	PhaseDirScan      TaskPhase = "dirscan"
+	PhaseJSFinder     TaskPhase = "jsfinder"
 	PhasePocScan      TaskPhase = "pocscan"
 )
 
@@ -41,7 +42,8 @@ var DefaultPhaseOrder = []PhaseConfig{
 	{Phase: PhasePortIdentify, Name: "端口识别", Scanner: "nmap/fingerprintx", ProgressStart: 40, ProgressEnd: 50, ContinueOnError: true},
 	{Phase: PhaseFingerprint, Name: "指纹识别", Scanner: "fingerprint", ProgressStart: 50, ProgressEnd: 65, ContinueOnError: true},
 	{Phase: PhaseBruteScan, Name: "弱口令扫描", Scanner: "brutescan", ProgressStart: 65, ProgressEnd: 75, ContinueOnError: true},
-	{Phase: PhaseDirScan, Name: "目录扫描", Scanner: "ffuf", ProgressStart: 75, ProgressEnd: 85, ContinueOnError: true},
+	{Phase: PhaseDirScan, Name: "目录扫描", Scanner: "ffuf", ProgressStart: 75, ProgressEnd: 80, ContinueOnError: true},
+	{Phase: PhaseJSFinder, Name: "JS敏感信息扫描", Scanner: "jsfinder", ProgressStart: 80, ProgressEnd: 85, ContinueOnError: true},
 	{Phase: PhasePocScan, Name: "漏洞扫描", Scanner: "nuclei", ProgressStart: 85, ProgressEnd: 100, ContinueOnError: true},
 }
 
@@ -362,6 +364,8 @@ func (r *TaskRunner) isPhaseEnabled(taskCtx *TaskContext, phase TaskPhase) bool 
 		return config.BruteScan != nil && config.BruteScan.Enable
 	case PhaseDirScan:
 		return config.DirScan != nil && config.DirScan.Enable
+	case PhaseJSFinder:
+		return config.JSFinder != nil && config.JSFinder.Enable
 	case PhasePocScan:
 		return config.PocScan != nil && config.PocScan.Enable
 	default:
@@ -440,6 +444,8 @@ func (r *TaskRunner) getPhaseOptions(taskCtx *TaskContext, phase TaskPhase) inte
 		return config.BruteScan
 	case PhaseDirScan:
 		return config.DirScan
+	case PhaseJSFinder:
+		return config.JSFinder
 	case PhasePocScan:
 		return config.PocScan
 	default:
