@@ -772,6 +772,11 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 			w.taskLog(task.TaskId, LevelInfo, "POC template auto selection: tags=%v", autoTags)
 			templates = w.getTemplatesByTags(ctx.Ctx, autoTags, severities)
 			w.taskLog(task.TaskId, LevelInfo, "Loaded %d POC templates", len(templates))
+
+			if len(templates) == 0 {
+				w.taskLog(task.TaskId, LevelWarn, "POC scan: identified %d fingerprint tags but no matching templates found in database, skipping POC scan", len(autoTags))
+				return &PhaseResult{}, nil
+			}
 		} else {
 			w.taskLog(task.TaskId, LevelWarn, "No POC templates configured, skipping POC scan")
 			return &PhaseResult{}, nil
@@ -788,30 +793,10 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 	// 创建漏洞缓冲区
 	vulBuffer := NewVulnerabilityBuffer(1)
 
-	// 使用 Worker 并发数
-	if config.Concurrency <= 0 || config.Concurrency > w.config.Concurrency {
-		config.Concurrency = w.config.Concurrency
-	}
-
-	// 按单目标超时计算总超时：单目标超时 × 目标数 / 并发数
-	pocConcurrency := config.Concurrency
-	if pocConcurrency <= 0 {
-		pocConcurrency = 1
-	}
-	pocTimeout := pocTargetTimeout * len(assets) / pocConcurrency
-	if pocTimeout < 60 {
-		pocTimeout = 60
-	}
-	// 设置总超时上限，避免单批次POC扫描阻塞过久
-	// 最大不超过1800秒（30分钟），超时后返回已有结果
-	maxPocTimeout := 1800
-	if pocTimeout > maxPocTimeout {
-		w.taskLog(task.TaskId, LevelInfo, "POC scan: timeout capped from %ds to %ds", pocTimeout, maxPocTimeout)
-		pocTimeout = maxPocTimeout
-	}
-	w.taskLog(task.TaskId, LevelInfo, "POC scan: total timeout=%ds (single=%ds, assets=%d, concurrency=%d)",
-		pocTimeout, pocTargetTimeout, len(assets), pocConcurrency)
-	pocCtx, pocCancel := context.WithTimeout(ctx.Ctx, time.Duration(pocTimeout)*time.Second)
+	// 超时直接使用单目标超时，由自适应调度器管理并发和速率
+	w.taskLog(task.TaskId, LevelInfo, "POC scan: target timeout=%ds, assets=%d (concurrency/rate managed by adaptive scheduler)",
+		pocTargetTimeout, len(assets))
+	pocCtx, pocCancel := context.WithTimeout(ctx.Ctx, time.Duration(pocTargetTimeout)*time.Second)
 	defer pocCancel()
 
 	// 启动后台刷新协程
@@ -836,15 +821,12 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 		}
 	}()
 
-	// 构建 Nuclei 扫描选项
+	// 构建 Nuclei 扫描选项（并发和速率由自适应调度器决定）
 	taskIdForCallback := task.TaskId
 	nucleiOpts := &scanner.NucleiOptions{
 		Severity:        config.Severity,
 		Tags:            autoTags,
 		ExcludeTags:     config.ExcludeTags,
-		RateLimit:       config.RateLimit,
-		Concurrency:     config.Concurrency,
-		Timeout:         pocTimeout,
 		TargetTimeout:   pocTargetTimeout,
 		AutoScan:        false,
 		AutomaticScan:   false,
@@ -857,14 +839,6 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 			w.taskLog(taskIdForCallback, LevelInfo, "Vulnerability found: %s → %s", vul.PocFile, vul.Url)
 			vulBuffer.Add(vul)
 		},
-	}
-
-	// 设置默认值
-	if nucleiOpts.RateLimit == 0 {
-		nucleiOpts.RateLimit = 800
-	}
-	if nucleiOpts.Concurrency == 0 {
-		nucleiOpts.Concurrency = 25
 	}
 
 	// 创建任务日志回调
@@ -887,7 +861,7 @@ func (e *PocScanExecutor) Execute(ctx *TaskContext) (*PhaseResult, error) {
 
 	// 检查是否超时
 	if pocCtx.Err() == context.DeadlineExceeded {
-		w.taskLog(task.TaskId, LevelWarn, "POC scan timeout after %ds", pocTimeout)
+		w.taskLog(task.TaskId, LevelWarn, "POC scan timeout after %ds", pocTargetTimeout)
 	}
 
 	// 检查控制信号

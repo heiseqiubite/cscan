@@ -19,6 +19,7 @@ import (
 	"cscan/pkg/mapping"
 	"cscan/pkg/utils"
 	"cscan/scanner"
+	"cscan/scanner/brute"
 	"cscan/scheduler"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -2055,25 +2056,25 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 	// 执行 JSFinder 扫描（JS 敏感信息 + 未授权检测）
 	if config.JSFinder != nil && config.JSFinder.Enable && !completedPhases["jsfinder"] {
 		// 强制扫描模式：没有资产时从用户输入目标生成资产
-		if len(allAssets) == 0 && target != "" {
+		if len(allAssets) == 0 && target != "" && config.JSFinder.ForceScan {
 			generatedAssets := scanner.GenerateAssetsFromTargets(target)
 			generatedAssets = filterSkippedHostsAssets(generatedAssets, skippedHosts)
 			if len(generatedAssets) > 0 {
 				allAssets = append(allAssets, generatedAssets...)
-				w.taskLog(task.TaskId, LevelInfo, "JSFinder: generated %d assets from target", len(generatedAssets))
+				w.taskLog(task.TaskId, LevelInfo, "JSFinder: generated %d assets from target (force scan)", len(generatedAssets))
 			}
 		}
 
 		if len(allAssets) == 0 {
 			w.taskLog(task.TaskId, LevelInfo, "JSFinder: skipped (no assets)")
 			completedPhases["jsfinder"] = true
-			w.incrSubTaskDone(ctx, task, "JS敏感信息扫描")
+			w.incrSubTaskDone(ctx, task, "JS扫描")
 		} else {
 			if w.handleTaskControl(ctx, task, completedPhases, allAssets, "") {
 				return
 			}
 
-			w.updateTaskProgressWithPhase(ctx, task.TaskId, 80, "JS敏感信息扫描中", "JS敏感信息扫描")
+			w.updateTaskProgressWithPhase(ctx, task.TaskId, 80, "JS扫描中", "JS扫描")
 
             jsfinderResults := w.executeJSFinder(ctx, task, allAssets, config.JSFinder, orgId)
 			if len(jsfinderResults) > 0 {
@@ -2105,15 +2106,15 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
                 resp, err := w.httpClient.SaveJSFinderResult(ctx, req)
                 if err != nil {
                     w.taskLog(task.TaskId, LevelError, "JSFinder save failed: %v", err)
-                } else if !resp.Success {
+                } else if resp.Code != 0 {
                     w.taskLog(task.TaskId, LevelWarn, "JSFinder save response: %s", resp.Msg)
                 } else {
                     w.taskLog(task.TaskId, LevelInfo, "JSFinder completed: saved %d findings", len(jsfinderResults))
                 }
 			}
-			w.updateTaskProgressWithPhase(ctx, task.TaskId, 85, "JS敏感信息扫描完成", "JS敏感信息扫描")
+			w.updateTaskProgressWithPhase(ctx, task.TaskId, 85, "JS扫描完成", "JS扫描")
 			completedPhases["jsfinder"] = true
-			w.incrSubTaskDone(ctx, task, "JS敏感信息扫描")
+			w.incrSubTaskDone(ctx, task, "JS扫描")
 		}
 	}
 
@@ -2179,23 +2180,133 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 					templates = w.getAllCustomPocs(ctx, severities)
 					w.taskLog(task.TaskId, LevelInfo, "CustomPocOnly mode: loaded %d custom POC templates", len(templates))
 				} else {
-				// 优化：按资产分组，每组只加载相关的POC模板
-				// 当AutoScan或AutomaticScan启用时，按资产的指纹标签进行分组
-				var groups []*AssetGroup
-				if config.PocScan.AutoScan || config.PocScan.AutomaticScan {
-					groups = w.groupAssetsByTags(allAssets, config.PocScan)
+					// 优化：按资产分组，每组只加载相关的POC模板
+					// 当AutoScan或AutomaticScan启用时，按资产的指纹标签进行分组
+					var groups []*AssetGroup
+					if config.PocScan.AutoScan || config.PocScan.AutomaticScan {
+						groups = w.groupAssetsByTags(allAssets, config.PocScan)
 
-					// 输出分组信息日志
-					for _, group := range groups {
-						w.taskLog(task.TaskId, LevelInfo, "Auto-scan group: tags=%v, assets=%d", group.Tags, len(group.Assets))
+						// 输出分组信息日志
+						for _, group := range groups {
+							w.taskLog(task.TaskId, LevelInfo, "Auto-scan group: tags=%v, assets=%d", group.Tags, len(group.Assets))
+						}
+					}
+
+					if len(groups) > 0 {
+						w.taskLog(task.TaskId, LevelInfo, "POC template auto selection: %d asset groups", len(groups))
+
+						// 用于统计漏洞数量
+						var vulCount int
+
+						// 创建漏洞缓冲区，发现漏洞立即保存
+						vulBuffer := NewVulnerabilityBuffer(1)
+
+						// 获取单目标超时配置
+						targetTimeout := config.PocScan.TargetTimeout
+						if targetTimeout <= 0 {
+							targetTimeout = 600 // 默认600秒
+						}
+
+						// 超时直接使用单目标超时，由自适应调度器管理并发和速率
+						w.taskLog(task.TaskId, LevelInfo, "POC scan: target timeout=%ds, assets=%d, groups=%d (concurrency/rate managed by adaptive scheduler)",
+							targetTimeout, len(allAssets), len(groups))
+						pocCtx, pocCancel := context.WithTimeout(ctx, time.Duration(targetTimeout)*time.Second)
+
+						// 启动后台刷新协程
+						flushDone := make(chan struct{})
+						go func() {
+							defer close(flushDone)
+							ticker := time.NewTicker(5 * time.Second)
+							defer ticker.Stop()
+							for {
+								select {
+								case <-pocCtx.Done():
+									return
+								case <-flushDone:
+									return
+								case <-vulBuffer.flushChan:
+									vulBuffer.Flush(pocCtx, func(vuls []*scanner.Vulnerability) {
+										w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, vuls)
+									})
+								case <-ticker.C:
+									vulBuffer.Flush(pocCtx, func(vuls []*scanner.Vulnerability) {
+										w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, vuls)
+									})
+								}
+							}
+						}()
+
+						// 遍历每个分组进行扫描
+						taskIdForCallback := task.TaskId
+						severities := []string{}
+						if config.PocScan.Severity != "" {
+							severities = strings.Split(config.PocScan.Severity, ",")
+						}
+
+						for _, group := range groups {
+							groupTemplates := w.getTemplatesByTags(ctx, group.Tags, severities)
+							if len(groupTemplates) == 0 {
+								w.taskLog(task.TaskId, LevelInfo, "Group (tags=%v): no templates loaded, skipping", group.Tags)
+								continue
+							}
+							w.taskLog(task.TaskId, LevelInfo, "Group (tags=%v, assets=%d): loaded %d templates", group.Tags, len(group.Assets), len(groupTemplates))
+
+							// 构建该分组的扫描选项（并发和速率由自适应调度器决定）
+							groupOpts := &scanner.NucleiOptions{
+								Severity:        config.PocScan.Severity,
+								Tags:            group.Tags,
+								ExcludeTags:     config.PocScan.ExcludeTags,
+								TargetTimeout:   targetTimeout,
+								AutoScan:        false,
+								AutomaticScan:   false,
+								CustomPocOnly:   false,
+								CustomTemplates: groupTemplates,
+								TagMappings:     nil,
+								CustomHeaders:   config.PocScan.CustomHeaders,
+								OnVulnerabilityFound: func(vul *scanner.Vulnerability) {
+									vulCount++
+									w.taskLog(taskIdForCallback, LevelInfo, "Vulnerability found: %s → %s", vul.PocFile, vul.Url)
+									vulBuffer.Add(vul)
+								},
+							}
+
+							// 创建任务日志回调
+							pocTaskLogger := func(level, format string, args ...interface{}) {
+								w.taskLog(task.TaskId, level, format, args...)
+							}
+
+							// 扫描该分组的资产
+							result, err := s.Scan(pocCtx, &scanner.ScanConfig{
+								Assets:     group.Assets,
+								Options:    groupOpts,
+								TaskLogger: pocTaskLogger,
+							})
+
+							if err != nil {
+								w.taskLog(task.TaskId, LevelError, "POC scan error (group tags=%v): %v", group.Tags, err)
+							}
+							if result != nil {
+								allVuls = append(allVuls, result.Vulnerabilities...)
+							}
+						}
+
+						pocCancel()
+
+						// 扫描完成后，刷新剩余的漏洞
+						vulBuffer.Flush(ctx, func(vuls []*scanner.Vulnerability) {
+							w.saveVulResult(ctx, task.WorkspaceId, task.MainTaskId, vuls)
+						})
+
+						if vulCount > 0 {
+							w.taskLog(task.TaskId, LevelInfo, "POC scan completed: found %d vulnerabilities", vulCount)
+						}
+					} else {
+						w.taskLog(task.TaskId, LevelWarn, "No POC templates configured (no tags matched), skipping POC scan")
 					}
 				}
 
-				if len(groups) == 0 {
-					w.taskLog(task.TaskId, LevelWarn, "No POC templates configured (no tags matched), skipping POC scan")
-				} else {
-					w.taskLog(task.TaskId, LevelInfo, "POC template auto selection: %d asset groups", len(groups))
-
+				// 统一扫描执行：当模板通过 ID 或 CustomPocOnly 方式加载后，执行扫描
+				if len(templates) > 0 {
 					// 用于统计漏洞数量
 					var vulCount int
 
@@ -2203,39 +2314,15 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 					vulBuffer := NewVulnerabilityBuffer(1)
 
 					// 获取单目标超时配置
-					targetTimeout := config.PocScan.TargetTimeout
-					if targetTimeout <= 0 {
-						targetTimeout = 600 // 默认600秒
+					pocTargetTimeout := config.PocScan.TargetTimeout
+					if pocTargetTimeout <= 0 {
+						pocTargetTimeout = 600
 					}
 
-					// 使用 Worker 并发数
-					if config.PocScan.Concurrency <= 0 || config.PocScan.Concurrency > w.config.Concurrency {
-						config.PocScan.Concurrency = w.config.Concurrency
-					}
-
-					// 按单目标超时计算总超时：单目标超时 × 目标数 / 并发数
-					pocConcurrency := config.PocScan.Concurrency
-					if pocConcurrency <= 0 {
-						pocConcurrency = 1
-					}
-					pocTimeout := targetTimeout * len(allAssets) / pocConcurrency
-					if pocTimeout < 60 {
-						pocTimeout = 60
-					}
-					// 按分组数量动态调整超时上限：分组越多，每个分组扫描的模板越少，总耗时越短
-					// 基线：1组时最多30分钟；分组越多，上限适当放宽以应对网络波动
-					baseTimeout := 1800   // 1组时的基线（30分钟）
-					maxPocTimeout := baseTimeout + len(groups)*300 // 每组增加5分钟
-					if maxPocTimeout > 7200 {
-						maxPocTimeout = 7200 // 最多2小时
-					}
-					if pocTimeout > maxPocTimeout {
-						w.taskLog(task.TaskId, LevelInfo, "POC scan: timeout capped from %ds to %ds (groups=%d)", pocTimeout, maxPocTimeout, len(groups))
-						pocTimeout = maxPocTimeout
-					}
-					w.taskLog(task.TaskId, LevelInfo, "POC scan: total timeout=%ds (single=%ds, assets=%d, concurrency=%d, groups=%d)",
-						pocTimeout, targetTimeout, len(allAssets), pocConcurrency, len(groups))
-					pocCtx, pocCancel := context.WithTimeout(ctx, time.Duration(pocTimeout)*time.Second)
+					// 超时直接使用单目标超时，由自适应调度器管理并发和速率
+					w.taskLog(task.TaskId, LevelInfo, "POC scan: target timeout=%ds, assets=%d (concurrency/rate managed by adaptive scheduler)",
+						pocTargetTimeout, len(allAssets))
+					pocCtx, pocCancel := context.WithTimeout(ctx, time.Duration(pocTargetTimeout)*time.Second)
 
 					// 启动后台刷新协程
 					flushDone := make(chan struct{})
@@ -2261,67 +2348,40 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 						}
 					}()
 
-					// 遍历每个分组进行扫描
 					taskIdForCallback := task.TaskId
-					severities := []string{}
-					if config.PocScan.Severity != "" {
-						severities = strings.Split(config.PocScan.Severity, ",")
+					// 并发和速率由自适应调度器决定
+					nucleiOpts := &scanner.NucleiOptions{
+						Severity:        config.PocScan.Severity,
+						ExcludeTags:     config.PocScan.ExcludeTags,
+						TargetTimeout:   pocTargetTimeout,
+						AutoScan:        false,
+						AutomaticScan:   false,
+						CustomPocOnly:   config.PocScan.CustomPocOnly,
+						CustomTemplates: templates,
+						TagMappings:     config.PocScan.TagMappings,
+						CustomHeaders:   config.PocScan.CustomHeaders,
+						OnVulnerabilityFound: func(vul *scanner.Vulnerability) {
+							vulCount++
+							w.taskLog(taskIdForCallback, LevelInfo, "Vulnerability found: %s → %s", vul.PocFile, vul.Url)
+							vulBuffer.Add(vul)
+						},
 					}
 
-					for _, group := range groups {
-						groupTemplates := w.getTemplatesByTags(ctx, group.Tags, severities)
-						if len(groupTemplates) == 0 {
-							w.taskLog(task.TaskId, LevelInfo, "Group (tags=%v): no templates loaded, skipping", group.Tags)
-							continue
-						}
-						w.taskLog(task.TaskId, LevelInfo, "Group (tags=%v, assets=%d): loaded %d templates", group.Tags, len(group.Assets), len(groupTemplates))
+					pocTaskLogger := func(level, format string, args ...interface{}) {
+						w.taskLog(task.TaskId, level, format, args...)
+					}
 
-						// 构建该分组的扫描选项
-						groupOpts := &scanner.NucleiOptions{
-							Severity:        config.PocScan.Severity,
-							Tags:            group.Tags,
-							ExcludeTags:     config.PocScan.ExcludeTags,
-							RateLimit:       config.PocScan.RateLimit,
-							Concurrency:     config.PocScan.Concurrency,
-							Timeout:         pocTimeout,
-							TargetTimeout:   targetTimeout,
-							AutoScan:        false,
-							AutomaticScan:   false,
-							CustomPocOnly:   false,
-							CustomTemplates: groupTemplates,
-							TagMappings:     nil,
-							CustomHeaders:   config.PocScan.CustomHeaders,
-							OnVulnerabilityFound: func(vul *scanner.Vulnerability) {
-								vulCount++
-								w.taskLog(taskIdForCallback, LevelInfo, "Vulnerability found: %s → %s", vul.PocFile, vul.Url)
-								vulBuffer.Add(vul)
-							},
-						}
-						if groupOpts.RateLimit == 0 {
-							groupOpts.RateLimit = 150
-						}
-						if groupOpts.Concurrency == 0 {
-							groupOpts.Concurrency = 25
-						}
+					result, err := s.Scan(pocCtx, &scanner.ScanConfig{
+						Assets:     allAssets,
+						Options:    nucleiOpts,
+						TaskLogger: pocTaskLogger,
+					})
 
-						// 创建任务日志回调
-						pocTaskLogger := func(level, format string, args ...interface{}) {
-							w.taskLog(task.TaskId, level, format, args...)
-						}
-
-						// 扫描该分组的资产
-						result, err := s.Scan(pocCtx, &scanner.ScanConfig{
-							Assets:     group.Assets,
-							Options:    groupOpts,
-							TaskLogger: pocTaskLogger,
-						})
-
-						if err != nil {
-							w.taskLog(task.TaskId, LevelError, "POC scan error (group tags=%v): %v", group.Tags, err)
-						}
-						if result != nil {
-							allVuls = append(allVuls, result.Vulnerabilities...)
-						}
+					if err != nil {
+						w.taskLog(task.TaskId, LevelError, "POC scan error: %v", err)
+					}
+					if result != nil {
+						allVuls = append(allVuls, result.Vulnerabilities...)
 					}
 
 					pocCancel()
@@ -2335,7 +2395,6 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 						w.taskLog(task.TaskId, LevelInfo, "POC scan completed: found %d vulnerabilities", vulCount)
 					}
 				}
-				} // 结束 POC 模板选择的 else 分支
 			}
 			// POC扫描模块完成，递增子任务进度
 			w.incrSubTaskDone(ctx, task, "漏洞扫描")
@@ -4208,6 +4267,20 @@ func (w *Worker) executeBruteScan(ctx context.Context, task *scheduler.TaskInfo,
 
 	if len(bruteAssets) == 0 {
 		w.taskLog(task.TaskId, LevelInfo, "Brute scan: skipped (no service assets)")
+		return nil
+	}
+
+	// 预检查：是否有资产匹配到暴力破解插件
+	hasPlugin := false
+	for _, asset := range bruteAssets {
+		normalizedService := brute.NormalizeServiceName(asset.Service)
+		if brute.GetPlugin(normalizedService) != nil {
+			hasPlugin = true
+			break
+		}
+	}
+	if !hasPlugin {
+		w.taskLog(task.TaskId, LevelInfo, "Brute scan: skipped (no matching brute-force plugin for detected services)")
 		return nil
 	}
 
