@@ -45,6 +45,7 @@ type AppDetectionResult struct {
 	OriginalName string   // 原始名称（可能包含版本号）
 	Sources      []string // 检测来源：httpx, wappalyzer, custom
 	CustomIDs    []string // 自定义指纹的ID列表
+	ActiveIDs    []string // 主动指纹的ID列表
 }
 
 // NewFingerprintScanner 创建指纹扫描器
@@ -491,24 +492,7 @@ func (s *FingerprintScanner) runAdditionalFingerprint(ctx context.Context, asset
 	// 收集所有指纹识别结果，用于智能合并
 	appResults := make(map[string]*AppDetectionResult)
 
-	// 解析现有的httpx结果
-	for _, app := range asset.App {
-		if strings.Contains(app, "[httpx]") {
-			appName := extractAppName(app)
-			// 移除版本号（格式如 Nginx:1.24.0）
-			baseAppName := appName
-			if colonIdx := strings.Index(appName, ":"); colonIdx > 0 {
-				baseAppName = appName[:colonIdx]
-			}
-			baseAppNameLower := strings.ToLower(baseAppName)
-			if appResults[baseAppNameLower] == nil {
-				appResults[baseAppNameLower] = &AppDetectionResult{Name: baseAppName}
-			}
-			appResults[baseAppNameLower].Sources = append(appResults[baseAppNameLower].Sources, "httpx")
-			appResults[baseAppNameLower].OriginalName = app // 保留原始名称（可能包含版本号）
-		}
-	}
-
+	mergeExistingAppDetections(appResults, asset.App)
 	// 如果启用Wappalyzer，进行检测（httpx模式下通常不需要，但保留兼容性）
 	if opts.Wappalyzer && s.wappalyzerClient != nil {
 		apps := s.wappalyzerClient.Fingerprint(headers, []byte(asset.HttpBody))
@@ -591,22 +575,11 @@ func (s *FingerprintScanner) runAdditionalFingerprint(ctx context.Context, asset
 		logx.Debugf("Custom fingerprint engine (loaded %d fingerprints) detected apps for %s:%d: %v", fpCount, asset.Host, asset.Port, customApps)
 
 		for _, customApp := range customApps {
-			appNameLower := strings.ToLower(customApp.Name)
-			if result, exists := appResults[appNameLower]; exists {
-				result.Sources = append(result.Sources, "custom")
-				result.CustomIDs = append(result.CustomIDs, customApp.Id)
-			} else {
-				appResults[appNameLower] = &AppDetectionResult{
-					Name:         customApp.Name,
-					OriginalName: customApp.Name,
-					Sources:      []string{"custom"},
-					CustomIDs:    []string{customApp.Id},
-				}
-			}
+			mergeFingerprintDetection(appResults, customApp)
 			if taskLog != nil {
-				taskLog("INFO", "发现应用指纹: %s:%d -> %s (来源: custom)", asset.Host, asset.Port, customApp.Name)
+				taskLog("INFO", "发现应用指纹: %s:%d -> %s (来源: %s)", asset.Host, asset.Port, customApp.Name, customApp.Source)
 			} else {
-				logx.Infof("发现应用指纹: %s:%d -> %s (来源: custom)", asset.Host, asset.Port, customApp.Name)
+				logx.Infof("发现应用指纹: %s:%d -> %s (来源: %s)", asset.Host, asset.Port, customApp.Name, customApp.Source)
 			}
 		}
 	}
@@ -840,23 +813,11 @@ func (s *FingerprintScanner) fingerprint(ctx context.Context, asset *Asset, opts
 			}
 
 			for _, customApp := range customApps {
-				appNameLower := strings.ToLower(customApp.Name)
-				// 查找是否已有相同应用（使用小写key匹配）
-				if result, exists := appResults[appNameLower]; exists {
-					result.Sources = append(result.Sources, "custom")
-					result.CustomIDs = append(result.CustomIDs, customApp.Id)
-				} else {
-					appResults[appNameLower] = &AppDetectionResult{
-						Name:         customApp.Name,
-						OriginalName: customApp.Name,
-						Sources:      []string{"custom"},
-						CustomIDs:    []string{customApp.Id},
-					}
-				}
+				mergeFingerprintDetection(appResults, customApp)
 				if taskLog != nil {
-					taskLog("INFO", "发现应用指纹: %s:%d -> %s (来源: custom)", asset.Host, asset.Port, customApp.Name)
+					taskLog("INFO", "发现应用指纹: %s:%d -> %s (来源: %s)", asset.Host, asset.Port, customApp.Name, customApp.Source)
 				} else {
-					logx.Infof("发现应用指纹: %s:%d -> %s (来源: custom)", asset.Host, asset.Port, customApp.Name)
+					logx.Infof("发现应用指纹: %s:%d -> %s (来源: %s)", asset.Host, asset.Port, customApp.Name, customApp.Source)
 				}
 			}
 		}
@@ -1431,6 +1392,99 @@ func extractAppName(app string) string {
 	return app
 }
 
+func mergeExistingAppDetections(appResults map[string]*AppDetectionResult, apps []string) {
+	for _, app := range apps {
+		result := parseAppDetection(app)
+		if result == nil {
+			continue
+		}
+		mergeAppDetectionResult(appResults, result)
+	}
+}
+
+func parseAppDetection(app string) *AppDetectionResult {
+	app = strings.TrimSpace(app)
+	if app == "" {
+		return nil
+	}
+	name := extractAppName(app)
+	if colonIdx := strings.Index(name, ":"); colonIdx > 0 {
+		name = name[:colonIdx]
+	}
+	result := &AppDetectionResult{Name: name, OriginalName: name}
+	left := strings.LastIndex(app, "[")
+	right := strings.LastIndex(app, "]")
+	if left < 0 || right <= left {
+		result.Sources = []string{"httpx"}
+		return result
+	}
+	for _, sourcePart := range strings.Split(app[left+1:right], "+") {
+		source, id := parseSourcePart(sourcePart)
+		if source == "" {
+			continue
+		}
+		result.Sources = append(result.Sources, source)
+		switch source {
+		case "custom":
+			if id != "" {
+				result.CustomIDs = append(result.CustomIDs, id)
+			}
+		case "active":
+			if id != "" {
+				result.ActiveIDs = append(result.ActiveIDs, id)
+			}
+		}
+	}
+	return result
+}
+
+func parseSourcePart(part string) (string, string) {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return "", ""
+	}
+	if open := strings.Index(part, "("); open > 0 && strings.HasSuffix(part, ")") {
+		return part[:open], part[open+1 : len(part)-1]
+	}
+	return part, ""
+}
+
+func mergeAppDetectionResult(appResults map[string]*AppDetectionResult, incoming *AppDetectionResult) {
+	key := strings.ToLower(incoming.Name)
+	if existing, ok := appResults[key]; ok {
+		existing.Sources = append(existing.Sources, incoming.Sources...)
+		existing.CustomIDs = append(existing.CustomIDs, incoming.CustomIDs...)
+		existing.ActiveIDs = append(existing.ActiveIDs, incoming.ActiveIDs...)
+		if existing.OriginalName == "" {
+			existing.OriginalName = incoming.OriginalName
+		}
+		return
+	}
+	appResults[key] = incoming
+}
+
+func mergeFingerprintDetection(appResults map[string]*AppDetectionResult, matched MatchedFingerprint) {
+	source := matched.Source
+	if source == "" {
+		source = "custom"
+	}
+	incoming := &AppDetectionResult{
+		Name:         matched.Name,
+		OriginalName: matched.Name,
+		Sources:      []string{source},
+		CustomIDs:    sourceIDs(matched, "custom"),
+		ActiveIDs:    sourceIDs(matched, "active"),
+	}
+	mergeAppDetectionResult(appResults, incoming)
+}
+
+func sourceIDs(matched MatchedFingerprint, source string) []string {
+	if matched.Source != source || matched.Id == "" {
+		return nil
+	}
+	return []string{matched.Id}
+}
+
 // formatAppWithSources 根据检测来源格式化应用名称
 func formatAppWithSources(result *AppDetectionResult) string {
 	if len(result.Sources) == 0 {
@@ -1456,51 +1510,46 @@ func formatAppWithSources(result *AppDetectionResult) string {
 	// 去重并排序来源
 	sources := utils.UniqueStrings(result.Sources)
 
-	// 构建来源标识
-	var sourceStr string
-	if len(sources) == 1 {
-		switch sources[0] {
-		case "custom":
-			if len(result.CustomIDs) > 0 {
-				sourceStr = fmt.Sprintf("[custom(%s)]", strings.Join(result.CustomIDs, ","))
-			} else {
-				sourceStr = "[custom]"
-			}
-		default:
-			sourceStr = fmt.Sprintf("[%s]", sources[0])
-		}
-	} else {
-		// 多个来源，按优先级排序：httpx > wappalyzer > custom
-		var orderedSources []string
-		for _, source := range []string{"httpx", "wappalyzer", "custom"} {
-			for _, s := range sources {
-				if s == source {
-					orderedSources = append(orderedSources, s)
-					break
-				}
-			}
-		}
-
-		// 构建合并的来源标识
-		if containsString(orderedSources, "custom") && len(result.CustomIDs) > 0 {
-			// 包含自定义指纹，需要特殊处理
-			var nonCustomSources []string
-			for _, s := range orderedSources {
-				if s != "custom" {
-					nonCustomSources = append(nonCustomSources, s)
-				}
-			}
-			if len(nonCustomSources) > 0 {
-				sourceStr = fmt.Sprintf("[%s+custom(%s)]", strings.Join(nonCustomSources, "+"), strings.Join(result.CustomIDs, ","))
-			} else {
-				sourceStr = fmt.Sprintf("[custom(%s)]", strings.Join(result.CustomIDs, ","))
-			}
-		} else {
-			sourceStr = fmt.Sprintf("[%s]", strings.Join(orderedSources, "+"))
-		}
-	}
+	orderedSources := orderFingerprintSources(sources)
+	sourceStr := fmt.Sprintf("[%s]", strings.Join(formatFingerprintSources(orderedSources, result), "+"))
 
 	return appName + sourceStr
+}
+
+func orderFingerprintSources(sources []string) []string {
+	orderedSources := make([]string, 0, len(sources))
+	for _, source := range []string{"httpx", "wappalyzer", "custom", "active"} {
+		for _, s := range sources {
+			if s == source {
+				orderedSources = append(orderedSources, s)
+				break
+			}
+		}
+	}
+	return orderedSources
+}
+
+func formatFingerprintSources(sources []string, result *AppDetectionResult) []string {
+	formatted := make([]string, 0, len(sources))
+	for _, source := range sources {
+		switch source {
+		case "custom":
+			formatted = append(formatted, formatSourceWithIDs("custom", result.CustomIDs))
+		case "active":
+			formatted = append(formatted, formatSourceWithIDs("active", result.ActiveIDs))
+		default:
+			formatted = append(formatted, source)
+		}
+	}
+	return formatted
+}
+
+func formatSourceWithIDs(source string, ids []string) string {
+	ids = utils.UniqueStrings(ids)
+	if len(ids) == 0 {
+		return source
+	}
+	return fmt.Sprintf("%s(%s)", source, strings.Join(ids, ","))
 }
 
 // containsString 检查字符串切片是否包含指定字符串
@@ -1511,6 +1560,21 @@ func containsString(slice []string, str string) bool {
 		}
 	}
 	return false
+}
+
+func mergeActiveFingerprintApp(asset *Asset, fp *model.Fingerprint) {
+	appResults := make(map[string]*AppDetectionResult)
+	mergeExistingAppDetections(appResults, asset.App)
+	mergeAppDetectionResult(appResults, &AppDetectionResult{
+		Name:         fp.Name,
+		OriginalName: fp.Name,
+		Sources:      []string{"active"},
+		ActiveIDs:    []string{fp.Id.Hex()},
+	})
+	asset.App = make([]string, 0, len(appResults))
+	for _, result := range appResults {
+		asset.App = append(asset.App, formatAppWithSources(result))
+	}
 }
 
 // ==================== Active Fingerprint Scanning ====================
@@ -1750,21 +1814,7 @@ func (s *FingerprintScanner) RunActiveFingerprint(ctx context.Context, assets []
 						} else {
 							logx.Debugf("Active fingerprint matched: %s -> %s (path: %s)", baseURL, fp.Name, path)
 						}
-
-						// 添加到资产的App列表
-						appName := fmt.Sprintf("%s[active(%s)]", fp.Name, fp.Id.Hex())
-
-						// 检查是否已存在
-						exists := false
-						for _, app := range asset.App {
-							if strings.HasPrefix(app, fp.Name) {
-								exists = true
-								break
-							}
-						}
-						if !exists {
-							asset.App = append(asset.App, appName)
-						}
+						mergeActiveFingerprintApp(asset, fp)
 					}
 				}(asset, fp, fullURL, path, baseURL)
 			}

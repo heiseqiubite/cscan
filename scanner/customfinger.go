@@ -60,8 +60,10 @@ type FingerprintData struct {
 
 // MatchedFingerprint 匹配到的指纹结果
 type MatchedFingerprint struct {
-	Name string // 指纹名称
-	Id   string // 指纹ID（MongoDB ObjectID）
+	Name      string // 指纹名称
+	Id        string // 指纹ID（MongoDB ObjectID）
+	Source    string // 指纹来源
+	IsBuiltin bool   // 是否内置指纹
 }
 
 // GetFingerprintCount 返回已加载的指纹数量
@@ -198,9 +200,8 @@ func (e *CustomFingerprintEngine) Match(data *FingerprintData) []string {
 // MatchWithId 执行指纹匹配，返回匹配到的应用名称和ID列表
 func (e *CustomFingerprintEngine) MatchWithId(data *FingerprintData) []MatchedFingerprint {
 	var matched []MatchedFingerprint
-	seen := make(map[string]bool)
+	matchedByName := make(map[string]int)
 
-	// 检查指纹数量
 	if len(e.fingerprints) == 0 {
 		return matched
 	}
@@ -210,45 +211,60 @@ func (e *CustomFingerprintEngine) MatchWithId(data *FingerprintData) []MatchedFi
 			continue
 		}
 
-		// 优先使用Rule字段（ARL格式规则语法）
 		if fp.Rule != "" {
 			if e.matchRule(fp.Rule, data) {
-				if !seen[fp.Name] {
-					matched = append(matched, MatchedFingerprint{
-						Name: fp.Name,
-						Id:   fp.Id.Hex(),
-					})
-					seen[fp.Name] = true
-				}
+				matched = appendOrReplaceMatchedFingerprint(matched, matchedByName, fp)
 			}
 			continue
 		}
 
-		// 使用ARL webapp.json格式规则（html/title/headers数组）
 		if e.matchARLWebappRules(fp, data) {
-			if !seen[fp.Name] {
-				matched = append(matched, MatchedFingerprint{
-					Name: fp.Name,
-					Id:   fp.Id.Hex(),
-				})
-				seen[fp.Name] = true
-			}
+			matched = appendOrReplaceMatchedFingerprint(matched, matchedByName, fp)
 			continue
 		}
 
-		// 使用Wappalyzer格式规则
 		if e.matchWappalyzerRules(fp, data) {
-			if !seen[fp.Name] {
-				matched = append(matched, MatchedFingerprint{
-					Name: fp.Name,
-					Id:   fp.Id.Hex(),
-				})
-				seen[fp.Name] = true
-			}
+			matched = appendOrReplaceMatchedFingerprint(matched, matchedByName, fp)
 		}
 	}
 
 	return matched
+}
+
+func appendOrReplaceMatchedFingerprint(matched []MatchedFingerprint, matchedByName map[string]int, fp *model.Fingerprint) []MatchedFingerprint {
+	match := newMatchedFingerprint(fp)
+	key := strings.ToLower(fp.Name)
+	if index, exists := matchedByName[key]; exists {
+		if shouldPreferFingerprintMatch(match, matched[index]) {
+			matched[index] = match
+		}
+		return matched
+	}
+	matchedByName[key] = len(matched)
+	return append(matched, match)
+}
+
+func shouldPreferFingerprintMatch(candidate, current MatchedFingerprint) bool {
+	if candidate.Source == "wappalyzer" && current.Source != "wappalyzer" {
+		return true
+	}
+	if candidate.IsBuiltin && !current.IsBuiltin {
+		return true
+	}
+	return false
+}
+
+func newMatchedFingerprint(fp *model.Fingerprint) MatchedFingerprint {
+	source := fp.Source
+	if source == "" {
+		source = "custom"
+	}
+	return MatchedFingerprint{
+		Name:      fp.Name,
+		Id:        fp.Id.Hex(),
+		Source:    source,
+		IsBuiltin: fp.IsBuiltin,
+	}
 }
 
 // matchARLWebappRules 匹配ARL webapp.json格式规则
@@ -515,39 +531,41 @@ func formatHeadersToString(headers http.Header) string {
 }
 
 // extractQuotedValue 提取引号内的值
-// 支持转义引号，如 body="id=\"swagger-ui" 会提取出 id="swagger-ui
+// 支持规则值内部包含未转义引号，取最左侧和最右侧引号之间的内容
 func extractQuotedValue(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) == 0 {
 		return s
 	}
 
-	// 检查是否以引号开头
 	if s[0] == '"' || s[0] == '\'' {
 		quoteChar := s[0]
-		// 从第二个字符开始找结束引号
-		for i := 1; i < len(s); i++ {
-			if s[i] == quoteChar {
-				// 检查是否是转义的引号
-				if i > 1 && s[i-1] == '\\' {
-					continue
-				}
-				// 提取值并处理转义引号
-				value := s[1:i]
-				return unescapeQuotes(value, quoteChar)
+		end := -1
+		for i := len(s) - 1; i > 0; i-- {
+			if s[i] == quoteChar && !isEscapedQuote(s, i) {
+				end = i
+				break
 			}
 		}
-		// 没有找到结束引号，返回去掉开头引号的内容，并处理转义
-		value := s[1:]
-		return unescapeQuotes(value, quoteChar)
+		if end == -1 {
+			end = len(s)
+		}
+		return unescapeQuotes(s[1:end], quoteChar)
 	}
 
-	// 不以引号开头，检查是否以引号结尾（处理格式错误的规则）
 	if s[len(s)-1] == '"' || s[len(s)-1] == '\'' {
 		return s[:len(s)-1]
 	}
 
 	return s
+}
+
+func isEscapedQuote(s string, pos int) bool {
+	backslashCount := 0
+	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashCount++
+	}
+	return backslashCount%2 == 1
 }
 
 // unescapeQuotes 将转义的引号还原
