@@ -32,6 +32,14 @@ func main() {
 
 	conf.MustLoad(*configFile, &c)
 
+	// 从环境变量加载 JWT secret（优先级高于配置文件）
+	c.LoadSecretFromEnv()
+	if c.Auth.AccessSecret == "" {
+		logx.Error("JWT secret not configured. Set CSCAN_JWT_SECRET environment variable.")
+		c.Auth.AccessSecret = uuid.New().String()
+		logx.Error("Using auto-generated JWT secret (NOT suitable for production)")
+	}
+
 	logx.MustSetup(c.Log)
 	logx.DisableStat()
 
@@ -44,11 +52,15 @@ func main() {
   \_____|_____/ \____/   \/  \/   |_| \_| 
                                          `)
 	fmt.Println("---------------------------------------------------------")
-	logx.Infof("🚀 Initializing CScan API Service...")
-	logx.Infof("⚙️  Config loaded from: %s", *configFile)
+	logx.Info("CScan API Service Starting")
+	logx.Infof("Config loaded from: %s", *configFile)
 	fmt.Println("---------------------------------------------------------")
 	// 创建服务上下文
-	svcCtx := svc.NewServiceContext(c)
+	svcCtx, err := svc.NewServiceContext(c)
+	if err != nil {
+		logx.Errorf("Failed to initialize service: %v", err)
+		return
+	}
 
 	// 创建HTTP服务器
 	server := rest.MustNewServer(c.RestConf)
@@ -66,12 +78,8 @@ func main() {
 	// 启动孤儿任务恢复后台任务（每 5 分钟检查一次）
 	go startOrphanedTaskRecovery(svcCtx)
 
-	// logx.Infof("Starting API server at %s:%d...", c.Host, c.Port)
-	fmt.Println("---------------------------------------------------------")
-	logx.Infof("✅ CScan API is running at: %s:%d", c.Host, c.Port)
-	logx.Infof("⚙️  Environment: %s | LogLevel: %s", c.Mode, c.Log.Level)
-	logx.Infof("📡 Ready to handle requests...")
-	fmt.Println("---------------------------------------------------------")
+	logx.Infof("CScan API is running at: %s:%d", c.Host, c.Port)
+	logx.Infof("Environment: %s | LogLevel: %s", c.Mode, c.Log.Level)
 	server.Start()
 }
 
@@ -215,6 +223,18 @@ func createAndPushCronTask(ctx context.Context, svcCtx *svc.ServiceContext, sche
 	// PortIdentify (missing from original code, but should be included)
 	if pi, ok := taskConfig["portidentify"].(map[string]interface{}); ok {
 		if enable, _ := pi["enable"].(bool); enable {
+			enabledModules++
+		}
+	}
+	// BruteScan
+	if bs, ok := taskConfig["brutescan"].(map[string]interface{}); ok {
+		if enable, _ := bs["enable"].(bool); enable {
+			enabledModules++
+		}
+	}
+	// JSFinder
+	if js, ok := taskConfig["jsfinder"].(map[string]interface{}); ok {
+		if enable, _ := js["enable"].(bool); enable {
 			enabledModules++
 		}
 	}
@@ -362,17 +382,21 @@ func createAndPushCronTask(ctx context.Context, svcCtx *svc.ServiceContext, sche
 	return nil
 }
 
+const (
+	orphanedTaskCheckInterval = 5 * time.Minute
+	orphanedTaskThreshold     = 30 * time.Minute
+)
+
 // startOrphanedTaskRecovery 启动孤儿任务恢复后台任务
 // 定期检查并恢复卡住的任务（状态为 STARTED 但长时间没有更新的任务）
 func startOrphanedTaskRecovery(svcCtx *svc.ServiceContext) {
 	logx.Info("Orphaned task recovery background job started")
 
-	// 每 5 分钟检查一次
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(orphanedTaskCheckInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		logic.RecoverOrphanedTasks(context.Background(), svcCtx, 30*time.Minute)
+		logic.RecoverOrphanedTasks(context.Background(), svcCtx, orphanedTaskThreshold)
 		logic.CleanupStaleProcessingTasks(context.Background(), svcCtx, "")
 	}
 }

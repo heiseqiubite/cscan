@@ -205,6 +205,43 @@ check_update() {
     esac
 }
 
+# 生成随机 JWT Secret
+generate_jwt_secret() {
+    # 生成 32 字节随机十六进制字符串
+    if command_exists openssl; then
+        openssl rand -hex 32
+    elif [ -r /dev/urandom ]; then
+        head -c 32 /dev/urandom | xxd -p -c 64
+    else
+        # fallback: 使用 $RANDOM 和日期组合
+        echo "$(date +%s%N)$$${RANDOM}${RANDOM}${RANDOM}${RANDOM}" | md5sum | head -c 64
+    fi
+}
+
+# 初始化 .env 文件（JWT Secret 等）
+init_env_file() {
+    if [ -f ".env" ]; then
+        # 检查 .env 中是否已有 CSCAN_JWT_SECRET
+        if grep -q "^CSCAN_JWT_SECRET=" .env 2>/dev/null; then
+            info "检测到 .env 中已有 CSCAN_JWT_SECRET，跳过生成"
+            return
+        fi
+        # 追加到已有 .env
+        local secret=$(generate_jwt_secret)
+        echo "" >> .env
+        echo "# CSCAN JWT Secret (自动生成，请勿泄露)" >> .env
+        echo "CSCAN_JWT_SECRET=${secret}" >> .env
+        info "已在 .env 中追加 CSCAN_JWT_SECRET"
+    else
+        # 创建新的 .env
+        local secret=$(generate_jwt_secret)
+        echo "# CSCAN 环境配置 (自动生成，请勿提交到版本控制)" > .env
+        echo "# JWT Secret: 用于签发和验证 JWT Token，更换后已登录用户需重新登录" >> .env
+        echo "CSCAN_JWT_SECRET=${secret}" >> .env
+        info "已创建 .env 并生成 CSCAN_JWT_SECRET"
+    fi
+}
+
 # 一键安装
 install_cscan() {
     info "开始安装 CSCAN..."
@@ -212,6 +249,9 @@ install_cscan() {
     if [ ! -f "$COMPOSE_FILE" ]; then
         abort "未找到 $COMPOSE_FILE，请确保在 CSCAN 目录下执行"
     fi
+
+    # 初始化 .env 文件（生成 JWT Secret）
+    init_env_file
 
     # 获取最新版本号
     local remote_ver=$(get_remote_version)

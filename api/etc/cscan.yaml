@@ -12,7 +12,9 @@ Log:
   TimeFormat: "15:04:05"
   
 Auth:
-  AccessSecret: "aKgPnXruwjMTjhDkSfNIP4LRZZkepj7vK4unzai68mJXTgdj"
+  # JWT Secret: 优先从环境变量 CSCAN_JWT_SECRET 读取
+  # 如未设置，将自动生成随机 secret（仅适用于开发环境）
+  AccessSecret: ""
   AccessExpire: 86400
 
 Mongo:

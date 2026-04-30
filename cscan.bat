@@ -138,10 +138,48 @@ set /p "do_upgrade=Upgrade now? (Y/N): "
 if /i "!do_upgrade!"=="Y" goto :upgrade
 goto :pause_return
 
+:generate_jwt_secret
+REM Generate a random JWT secret using PowerShell
+set "JWT_SECRET="
+for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "[System.BitConverter]::ToString((1..32 | ForEach-Object { Get-Random -Minimum 0 -Maximum 256 }) -as [byte[]]).Replace('-','').ToLower()" 2^>nul`) do set "JWT_SECRET=%%s"
+if not defined JWT_SECRET (
+    REM Fallback: use timestamp + random number
+    for /f "usebackq delims=" %%s in (`powershell -NoProfile -Command "((Get-Date).ToString('yyyyMMddHHmmssfff') + '-' + (Get-Random -Maximum 999999999).ToString())" 2^>nul`) do set "JWT_SECRET=%%s"
+)
+goto :eof
+
+:init_env_file
+REM Initialize .env file with JWT secret
+if exist ".env" (
+    REM Check if CSCAN_JWT_SECRET already exists in .env
+    findstr /B "CSCAN_JWT_SECRET=" .env >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [CSCAN] CSCAN_JWT_SECRET already exists in .env, skipping.
+        goto :eof
+    )
+    REM Append to existing .env
+    call :generate_jwt_secret
+    echo. >> .env
+    echo # CSCAN JWT Secret (auto-generated, keep secret)>> .env
+    echo CSCAN_JWT_SECRET=!JWT_SECRET!>> .env
+    echo [CSCAN] Appended CSCAN_JWT_SECRET to .env
+) else (
+    REM Create new .env
+    call :generate_jwt_secret
+    echo # CSCAN Environment Config (auto-generated, do not commit)>> .env
+    echo # JWT Secret: Used for JWT token signing, changing it requires re-login>> .env
+    echo CSCAN_JWT_SECRET=!JWT_SECRET!>> .env
+    echo [CSCAN] Created .env with CSCAN_JWT_SECRET
+)
+goto :eof
+
 :install
 echo.
 echo [CSCAN] Installing CSCAN...
 if not exist %COMPOSE_FILE% goto :no_compose_file
+
+REM Initialize .env file (generate JWT Secret)
+call :init_env_file
 
 if not "%REMOTE_VERSION%"=="unknown" echo [CSCAN] Installing version: %REMOTE_VERSION%
 
