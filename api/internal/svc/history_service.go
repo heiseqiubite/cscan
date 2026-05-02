@@ -2,9 +2,10 @@ package svc
 
 import (
 	"context"
-	"cscan/model"
 	"fmt"
 	"time"
+
+	"cscan/model"
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"

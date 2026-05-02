@@ -2,8 +2,9 @@ package svc
 
 import (
 	"context"
-	"cscan/model"
 	"time"
+
+	"cscan/model"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

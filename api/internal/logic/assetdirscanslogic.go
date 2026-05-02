@@ -2,10 +2,11 @@ package logic
 
 import (
 	"context"
+	"fmt"
+
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
 	"cscan/model"
-	"fmt"
 )
 
 type AssetDirScansLogic struct {

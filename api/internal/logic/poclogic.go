@@ -713,7 +713,7 @@ func (l *PocBatchValidateLogic) PocBatchValidate(req *types.PocBatchValidateReq,
 	if req.Concurrency <= 0 {
 		req.Concurrency = 10
 	}
-	if req.UseTemplate == false && req.UseCustom == false {
+	if !req.UseTemplate && !req.UseCustom {
 		req.UseTemplate = true
 		req.UseCustom = true
 	}

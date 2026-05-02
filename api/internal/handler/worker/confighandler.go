@@ -749,8 +749,8 @@ func WorkerConfigSubdomainDictHandler(svcCtx *svc.ServiceContext) http.HandlerFu
 
 // WorkerWeakpassDictReq 弱口令字典获取请求
 type WorkerWeakpassDictReq struct {
-	DictIds []string   `json:"dictIds"` // 字典ID列表
-	Services []string  `json:"services"` // 目标服务列表（用于过滤）
+	DictIds  []string `json:"dictIds"`  // 字典ID列表
+	Services []string `json:"services"` // 目标服务列表（用于过滤）
 }
 
 // WorkerWeakpassDictItem 弱口令字典项
@@ -765,7 +765,7 @@ type WorkerWeakpassDictItem struct {
 // WorkerWeakpassDictResp 弱口令字典获取响应
 type WorkerWeakpassDictResp struct {
 	Code  int                      `json:"code"`
-	Msg   string                  `json:"msg"`
+	Msg   string                   `json:"msg"`
 	Dicts []WorkerWeakpassDictItem `json:"dicts"`
 	Count int                      `json:"count"`
 }

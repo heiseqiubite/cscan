@@ -2,13 +2,14 @@ package logic
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"time"
+
 	"cscan/api/internal/logic/common"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
 	"cscan/pkg/utils"
-	"fmt"
-	"strings"
-	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"go.mongodb.org/mongo-driver/bson"
@@ -45,7 +46,7 @@ func (l *AssetGroupsLogic) AssetGroups(req *types.AssetGroupsReq, workspaceId st
 	for _, wsId := range wsIds {
 		// 1. 先从任务中提取目标域名，创建初始分组
 		taskModel := l.svcCtx.GetMainTaskModel(wsId)
-		
+
 		// 使用自定义排序查询，按 update_time 降序排序（获取最新状态的任务）
 		tasks, err := taskModel.FindAllWithSort(l.ctx, bson.M{}, bson.D{{Key: "update_time", Value: -1}})
 		if err != nil {
@@ -56,66 +57,66 @@ func (l *AssetGroupsLogic) AssetGroups(req *types.AssetGroupsReq, workspaceId st
 		// 用于记录每个域名对应的任务状态
 		domainTaskStatus := make(map[string]string)
 
-	for _, task := range tasks {
-		// 从任务目标中提取域名
-		targets := strings.Split(task.Target, "\n")
-		allDomainsAlreadySet := true
-		for _, target := range targets {
-			target = strings.TrimSpace(target)
-			if target == "" {
-				continue
-			}
-
-			// 提取主域名
-			domain := extractMainDomainFromTarget(target)
-			if domain == "" {
-				continue
-			}
-
-			// 只使用最新任务的状态（任务已按 update_time 降序排序）
-			// 如果已经设置过该域名的状态，跳过（因为后面的任务更旧）
-			if _, exists := domainTaskStatus[domain]; exists {
-				continue
-			}
-
-			allDomainsAlreadySet = false
-
-			// 第一次遇到该域名，使用当前任务的状态
-			taskStatus := getTaskStatusForGroup(task.Status)
-			domainTaskStatus[domain] = taskStatus
-			l.Logger.Infof("域名分组状态: domain=%s, status=%s, taskId=%s", domain, taskStatus, task.TaskId)
-
-			// 计算任务的真实执行时长（只使用最新任务）
-			if task.StartTime != nil && task.EndTime != nil {
-				domainDuration[domain] = task.EndTime.Sub(*task.StartTime)
-			} else if task.StartTime != nil && task.Status == "STARTED" {
-				domainDuration[domain] = time.Since(*task.StartTime)
-			} else {
-				domainDuration[domain] = 0
-			}
-
-			// 如果分组不存在，创建新分组
-			if _, exists := domainGroups[domain]; !exists {
-				domainGroups[domain] = &types.AssetGroup{
-					Domain:        domain,
-					Source:        "Auto Discovery",
-					Status:        domainTaskStatus[domain],
-					TotalServices: 0,
-					Duration:      "",
-					LastUpdated:   "",
-					FirstSeen:     task.CreateTime,
-					LatestUpdate:  task.UpdateTime,
+		for _, task := range tasks {
+			// 从任务目标中提取域名
+			targets := strings.Split(task.Target, "\n")
+			allDomainsAlreadySet := true
+			for _, target := range targets {
+				target = strings.TrimSpace(target)
+				if target == "" {
+					continue
 				}
-			} else {
-				domainGroups[domain].Status = domainTaskStatus[domain]
+
+				// 提取主域名
+				domain := extractMainDomainFromTarget(target)
+				if domain == "" {
+					continue
+				}
+
+				// 只使用最新任务的状态（任务已按 update_time 降序排序）
+				// 如果已经设置过该域名的状态，跳过（因为后面的任务更旧）
+				if _, exists := domainTaskStatus[domain]; exists {
+					continue
+				}
+
+				allDomainsAlreadySet = false
+
+				// 第一次遇到该域名，使用当前任务的状态
+				taskStatus := getTaskStatusForGroup(task.Status)
+				domainTaskStatus[domain] = taskStatus
+				l.Logger.Infof("域名分组状态: domain=%s, status=%s, taskId=%s", domain, taskStatus, task.TaskId)
+
+				// 计算任务的真实执行时长（只使用最新任务）
+				if task.StartTime != nil && task.EndTime != nil {
+					domainDuration[domain] = task.EndTime.Sub(*task.StartTime)
+				} else if task.StartTime != nil && task.Status == "STARTED" {
+					domainDuration[domain] = time.Since(*task.StartTime)
+				} else {
+					domainDuration[domain] = 0
+				}
+
+				// 如果分组不存在，创建新分组
+				if _, exists := domainGroups[domain]; !exists {
+					domainGroups[domain] = &types.AssetGroup{
+						Domain:        domain,
+						Source:        "Auto Discovery",
+						Status:        domainTaskStatus[domain],
+						TotalServices: 0,
+						Duration:      "",
+						LastUpdated:   "",
+						FirstSeen:     task.CreateTime,
+						LatestUpdate:  task.UpdateTime,
+					}
+				} else {
+					domainGroups[domain].Status = domainTaskStatus[domain]
+				}
+			}
+
+			// 优化：如果该任务所有域名都已设置过状态，后续任务只会更旧，可安全跳过
+			if allDomainsAlreadySet {
+				continue
 			}
 		}
-
-		// 优化：如果该任务所有域名都已设置过状态，后续任务只会更旧，可安全跳过
-		if allDomainsAlreadySet {
-			continue
-		}
-	}
 
 		// 2. 从资产中统计实际数据
 		assetModel := l.svcCtx.GetAssetModel(wsId)

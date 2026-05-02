@@ -55,10 +55,10 @@ type ServiceContext struct {
 	HistoryService    *HistoryService
 
 	// 缓存的模板元数据（并发安全）
-	templateMu           sync.RWMutex
-	TemplateCategories   []string
-	TemplateTags         []string
-	TemplateStats        map[string]int
+	templateMu         sync.RWMutex
+	TemplateCategories []string
+	TemplateTags       []string
+	TemplateStats      map[string]int
 }
 
 func NewServiceContext(c config.Config) (*ServiceContext, error) {

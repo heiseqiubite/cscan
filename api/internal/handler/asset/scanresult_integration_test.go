@@ -2,10 +2,11 @@ package asset
 
 import (
 	"context"
-	"cscan/api/internal/svc"
-	"cscan/model"
 	"testing"
 	"time"
+
+	"cscan/api/internal/svc"
+	"cscan/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

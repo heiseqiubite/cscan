@@ -3,10 +3,11 @@ package asset
 import (
 	"net/http"
 
+	"github.com/zeromicro/go-zero/rest/httpx"
+
 	"cscan/api/internal/logic"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
-	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
 func PortListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {

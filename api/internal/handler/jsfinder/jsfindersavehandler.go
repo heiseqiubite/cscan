@@ -1,12 +1,13 @@
 package jsfinder
 
 import (
+	"encoding/json"
+	"net/http"
+
 	"cscan/api/internal/logic"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
 	"cscan/pkg/response"
-	"encoding/json"
-	"net/http"
 )
 
 // SaveJSFinderResultHandler 处理保存 JSFinder 扫描结果请求

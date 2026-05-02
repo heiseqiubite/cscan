@@ -2,10 +2,11 @@ package logic
 
 import (
 	"context"
+	"sort"
+
 	"cscan/api/internal/logic/common"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
-	"sort"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"go.mongodb.org/mongo-driver/bson"

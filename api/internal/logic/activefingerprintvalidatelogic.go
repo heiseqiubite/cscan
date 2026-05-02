@@ -260,8 +260,9 @@ func createValidateHttpClient() *http.Client {
 	return &http.Client{
 		Timeout:   15 * time.Second,
 		Transport: transport,
+		// 与扫描器保持一致：最多跟随3次重定向后停止
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
+			if len(via) >= 3 {
 				return http.ErrUseLastResponse
 			}
 			return nil

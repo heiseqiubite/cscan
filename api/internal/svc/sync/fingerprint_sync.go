@@ -136,6 +136,6 @@ func getCategoryNames() map[int]string {
 		92: "Buy now pay later", 93: "Performance", 94: "Reservations & delivery",
 		95: "Referral marketing", 96: "Digital asset management", 97: "Content curation",
 		98: "Customer data platform", 99: "Cart abandonment", 100: "Shipping carriers",
-		101: "Fulfilment", 102: "Returns", 103: "Cross border ecommerce",
+		101: "Fulfillment", 102: "Returns", 103: "Cross border ecommerce",
 	}
 }

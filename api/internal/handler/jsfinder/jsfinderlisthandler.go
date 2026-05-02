@@ -1,12 +1,13 @@
 package jsfinder
 
 import (
+	"net/http"
+
 	"cscan/api/internal/logic"
 	"cscan/api/internal/middleware"
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
 	"cscan/pkg/response"
-	"net/http"
 
 	"github.com/zeromicro/go-zero/rest/httpx"
 )

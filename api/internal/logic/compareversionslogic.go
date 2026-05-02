@@ -2,9 +2,10 @@ package logic
 
 import (
 	"context"
+	"fmt"
+
 	"cscan/api/internal/svc"
 	"cscan/api/internal/types"
-	"fmt"
 )
 
 type CompareVersionsLogic struct {

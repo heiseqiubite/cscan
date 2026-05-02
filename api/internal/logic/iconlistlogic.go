@@ -97,10 +97,10 @@ func (l *IconListLogic) pickIconPresentation(iconHash string, assets []model.Ass
 		if screenshot == "" && asset.Screenshot != "" {
 			screenshot = asset.Screenshot
 		}
-		if asset.CreateTime.IsZero() == false && (earliestCreate.IsZero() || asset.CreateTime.Before(earliestCreate)) {
+		if !asset.CreateTime.IsZero() && (earliestCreate.IsZero() || asset.CreateTime.Before(earliestCreate)) {
 			earliestCreate = asset.CreateTime
 		}
-		if asset.UpdateTime.IsZero() == false && (latestUpdate.IsZero() || asset.UpdateTime.After(latestUpdate)) {
+		if !asset.UpdateTime.IsZero() && (latestUpdate.IsZero() || asset.UpdateTime.After(latestUpdate)) {
 			latestUpdate = asset.UpdateTime
 		}
 	}

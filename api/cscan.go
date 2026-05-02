@@ -248,8 +248,8 @@ func createAndPushCronTask(ctx context.Context, svcCtx *svc.ServiceContext, sche
 	const (
 		minSubTasks = 10
 		maxSubTasks = 30
-		minBatch   = 20
-		maxBatch   = 200
+		minBatch    = 20
+		maxBatch    = 200
 	)
 	targetCount := len(validTargets)
 	optimalBatches := (minSubTasks + maxSubTasks) / 2 / enabledModules
