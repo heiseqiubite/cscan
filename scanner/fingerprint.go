@@ -210,6 +210,9 @@ func (s *FingerprintScanner) Scan(ctx context.Context, config *ScanConfig) (*Sca
 					taskLog("DEBUG", "Preserving httpx result for %s:%d (title=%s, apps=%d)", remainAsset.Host, remainAsset.Port, remainAsset.Title, len(remainAsset.App))
 				}
 				result.Assets = append(result.Assets, remainAsset)
+				if config.OnAssetUpdated != nil {
+					config.OnAssetUpdated(remainAsset)
+				}
 			}
 			taskLog("INFO", "Fingerprint: total %d assets preserved after timeout", len(result.Assets))
 			return result, nil
@@ -235,6 +238,11 @@ func (s *FingerprintScanner) Scan(ctx context.Context, config *ScanConfig) (*Sca
 			}
 			processedSet[i] = true
 			result.Assets = append(result.Assets, asset)
+
+			// 触发流式更新回调
+			if config.OnAssetUpdated != nil {
+				config.OnAssetUpdated(asset)
+			}
 		}
 	}
 

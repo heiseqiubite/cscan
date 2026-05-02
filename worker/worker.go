@@ -1917,10 +1917,35 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 					w.taskLog(task.TaskId, level, format, args...)
 				}
 
+				// 创建流式资产缓冲区，满10个或每3秒触发批量保存
+				assetBuffer := NewAssetBuffer(10)
+				go func() {
+					ticker := time.NewTicker(3 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-assetBuffer.GetFlushChan():
+							assetBuffer.Flush(ctx, func(assets []*scanner.Asset) {
+								w.saveAssetResult(ctx, task.WorkspaceId, task.MainTaskId, orgId, assets)
+							})
+						case <-ticker.C:
+							assetBuffer.Flush(ctx, func(assets []*scanner.Asset) {
+								w.saveAssetResult(ctx, task.WorkspaceId, task.MainTaskId, orgId, assets)
+							})
+						case <-fpCtx.Done():
+							return
+						}
+					}
+				}()
+
 				result, err := s.Scan(fpCtx, &scanner.ScanConfig{
 					Assets:     assetsToScan,
 					Options:    config.Fingerprint,
 					TaskLogger: fpTaskLogger,
+					OnAssetUpdated: func(asset *scanner.Asset) {
+						copiedAsset := *asset
+						assetBuffer.Add(&copiedAsset)
+					},
 				})
 				fpCancel()
 
@@ -1963,8 +1988,10 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 						}
 					}
 
-					// 指纹识别完成后保存更新结果
-					w.saveAssetResult(ctx, task.WorkspaceId, task.MainTaskId, orgId, allAssets)
+					// 刷新流式缓冲区剩余资产
+					assetBuffer.Flush(ctx, func(assets []*scanner.Asset) {
+						w.saveAssetResult(ctx, task.WorkspaceId, task.MainTaskId, orgId, assets)
+					})
 				}
 			}
 			completedPhases["fingerprint"] = true
