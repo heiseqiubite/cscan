@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -19,9 +20,12 @@ import (
 	"cscan/api/internal/types"
 	"cscan/model"
 
+	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 	"github.com/zeromicro/go-zero/core/logx"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -511,10 +515,7 @@ func (l *FingerprintImportLogic) parseARLFingerJSON(content string) ([]*model.Fi
 // parseARLFingerYAML 解析ARL finger.yml格式
 func (l *FingerprintImportLogic) parseARLFingerYAML(content string) ([]*model.Fingerprint, int, error) {
 	var fingerprints []ARLFingerprint
-	var parseErr error
-
-	// 方式1: 直接解析为数组 [{name, rule}]
-	parseErr = yaml.Unmarshal([]byte(content), &fingerprints)
+	var parseErr error = yaml.Unmarshal([]byte(content), &fingerprints)
 
 	// 方式2: 如果解析失败或为空，尝试解析为map格式 {key: [{name, rule}]}
 	if parseErr != nil || len(fingerprints) == 0 {
@@ -1064,12 +1065,34 @@ func (l *FingerprintValidateLogic) FingerprintValidate(req *types.FingerprintVal
 	}
 
 	// 记录指纹验证日志，包含 icon_hash 信息
-	l.Logger.Infof("FingerprintValidate: fingerprintId=%s, name=%s, url=%s, icon_hash=%s, rule=%s",
-		fp.Id.Hex(), fp.Name, req.Url, data.FaviconHash, fp.Rule)
+	l.Logger.Infof("FingerprintValidate: fingerprintId=%s, name=%s, source=%s, url=%s, icon_hash=%s, rule=%s",
+		fp.Id.Hex(), fp.Name, fp.Source, req.Url, data.FaviconHash, fp.Rule)
 
-	// 创建指纹引擎并验证
+	// 对于 Wappalyzer 来源的指纹，优先使用 wappalyzergo 库检测（与扫描器一致）
+	if fp.Source == "wappalyzer" || fp.IsBuiltin {
+		wappalyzerClient, err := wappalyzer.New()
+		if err == nil {
+			apps := wappalyzerClient.Fingerprint(data.Headers, data.BodyBytes)
+			fpNameLower := strings.ToLower(fp.Name)
+			for app := range apps {
+				if strings.ToLower(app) == fpNameLower {
+					l.Logger.Infof("FingerprintValidate: wappalyzergo detected %s", fp.Name)
+					return &types.FingerprintValidateResp{
+						Code:    0,
+						Msg:     "验证完成",
+						Matched: true,
+						Details: fmt.Sprintf("wappalyzergo 库检测匹配: %s", fp.Name),
+					}, nil
+				}
+			}
+			l.Logger.Infof("FingerprintValidate: wappalyzergo did NOT detect %s, falling back to custom engine", fp.Name)
+		}
+	}
+
+	// 使用自定义引擎验证（兼容 ARL 格式和非内置 Wappalyzer 指纹）
 	engine := NewSingleFingerprintEngine(fp)
 	matched, conditions := engine.MatchWithDetails(data)
+	l.Logger.Infof("FingerprintValidate: custom engine matched=%v, conditions=%v", matched, conditions)
 
 	return &types.FingerprintValidateResp{
 		Code:    0,
@@ -1130,10 +1153,21 @@ type FingerprintData struct {
 
 // fetchFingerprintData 请求URL获取指纹匹配数据
 func fetchFingerprintData(targetUrl string) (*FingerprintData, error) {
+	// 与扫描器保持一致：始终使用基础URL（scheme://host:port）进行请求
+	// 扫描器在根URL上检测指纹，如果传入带路径的URL（如登录页），会导致指纹头丢失
+	targetUrl = extractBaseUrl(targetUrl)
+
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		// 与扫描器保持一致：最多跟随3次重定向后停止，使用重定向响应进行匹配
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return http.ErrUseLastResponse
+			}
+			return nil
 		},
 	}
 
@@ -1504,7 +1538,7 @@ func matchSingleConditionWithDetails(condition string, data *FingerprintData) (b
 
 	switch condTypeLower {
 	case "body":
-		result = containsIgnoreCase(data.Body, value)
+		result = matchBodyWithEncoding(data, value)
 		logx.Infof("matchSingleCondition body: result=%v, value=%s", result, value)
 		if result {
 			matchedValue = findMatchContext(data.Body, value, 50)
@@ -1533,9 +1567,14 @@ func matchSingleConditionWithDetails(condition string, data *FingerprintData) (b
 			matchedValue = data.URL
 		}
 	case "cookie":
-		result = containsIgnoreCase(data.Cookies, value)
+		// 同时检查Cookies字段和header字符串中的cookie（与扫描器一致）
+		cookieStr := data.Cookies
+		if cookieStr == "" && data.Headers != nil {
+			cookieStr = strings.Join(data.Headers["Set-Cookie"], " ")
+		}
+		result = containsIgnoreCase(cookieStr, value)
 		if result {
-			matchedValue = findMatchContext(data.Cookies, value, 100)
+			matchedValue = findMatchContext(cookieStr, value, 100)
 		}
 	case "icon_hash", "favicon_hash":
 		result = data.FaviconHash == value
@@ -1601,6 +1640,15 @@ func findMatchContext(text, keyword string, contextLen int) string {
 	return prefix + result + suffix
 }
 
+// isEscapedQuote 检查指定位置的引号是否被转义
+func isEscapedQuote(s string, pos int) bool {
+	backslashCount := 0
+	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashCount++
+	}
+	return backslashCount%2 == 1
+}
+
 func extractQuotedValue(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) == 0 {
@@ -1608,16 +1656,18 @@ func extractQuotedValue(s string) string {
 	}
 	if s[0] == '"' || s[0] == '\'' {
 		quoteChar := s[0]
-		for i := 1; i < len(s); i++ {
-			if s[i] == quoteChar && (i <= 1 || s[i-1] != '\\') {
-				// 提取值并处理转义引号
-				value := s[1:i]
-				return unescapeQuotes(value, quoteChar)
+		// 从末尾向前查找闭合引号（与扫描器一致）
+		end := -1
+		for i := len(s) - 1; i > 0; i-- {
+			if s[i] == quoteChar && !isEscapedQuote(s, i) {
+				end = i
+				break
 			}
 		}
-		// 没有找到结束引号，返回去掉开头引号的内容，并处理转义
-		value := s[1:]
-		return unescapeQuotes(value, quoteChar)
+		if end == -1 {
+			end = len(s)
+		}
+		return unescapeQuotes(s[1:end], quoteChar)
 	}
 	if s[len(s)-1] == '"' || s[len(s)-1] == '\'' {
 		return s[:len(s)-1]
@@ -1641,6 +1691,35 @@ func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
+// matchBodyWithEncoding 同时支持UTF-8和GBK编码匹配（与扫描器一致）
+func matchBodyWithEncoding(data *FingerprintData, keyword string) bool {
+	// 1. 先尝试UTF-8匹配
+	if containsIgnoreCase(data.Body, keyword) {
+		return true
+	}
+	// 2. 尝试将keyword转换为GBK编码后在原始字节中匹配
+	if len(data.BodyBytes) > 0 {
+		gbkKeyword, err := encodeToGBK(keyword)
+		if err == nil && len(gbkKeyword) > 0 {
+			if bytes.Contains(data.BodyBytes, gbkKeyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// encodeToGBK 将UTF-8字符串转换为GBK编码
+func encodeToGBK(s string) ([]byte, error) {
+	reader := transform.NewReader(strings.NewReader(s), simplifiedchinese.GBK.NewEncoder())
+	buf := new(bytes.Buffer)
+	_, err := buf.ReadFrom(reader)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func matchWappalyzerRules(fp *model.Fingerprint, data *FingerprintData) bool {
 	matched, _ := matchWappalyzerRulesWithDetails(fp, data)
 	return matched
@@ -1658,6 +1737,7 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		hasRule = true
 		headerMatch := false
 		for key, pattern := range fp.Headers {
+			logx.Infof("matchWappalyzer: checking header[%s] pattern=%q against resp headers", key, pattern)
 			// 遍历响应头，大小写不敏感匹配key
 			for hKey, hVal := range data.Headers {
 				if strings.EqualFold(hKey, key) {
@@ -1666,13 +1746,17 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 						// 只要header存在就匹配
 						headerMatch = true
 						matchedConditions = append(matchedConditions, fmt.Sprintf("header[%s] 存在 → 匹配到: %s", key, truncateString(headerValue, 80)))
+						logx.Infof("matchWappalyzer: header[%s] MATCHED (existence)", key)
 						break
 					}
 					// pattern是正则表达式
 					if matchRegexOrContains(headerValue, pattern) {
 						headerMatch = true
 						matchedConditions = append(matchedConditions, fmt.Sprintf("header[%s] =~ \"%s\" → 匹配到: %s", key, truncateString(pattern, 50), truncateString(headerValue, 80)))
+						logx.Infof("matchWappalyzer: header[%s] MATCHED value=%q", key, truncateString(headerValue, 80))
 						break
+					} else {
+						logx.Infof("matchWappalyzer: header[%s] value=%q did NOT match pattern=%q", key, truncateString(headerValue, 80), pattern)
 					}
 				}
 			}
@@ -1682,6 +1766,7 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		}
 		if !headerMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: header check FAILED, allMatch=false")
 		}
 	}
 
@@ -1690,14 +1775,17 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		hasRule = true
 		htmlMatch := false
 		for _, pattern := range fp.HTML {
+			logx.Infof("matchWappalyzer: checking html pattern=%q against body (len=%d)", truncateString(pattern, 60), len(data.Body))
 			if matchRegexOrContains(data.Body, pattern) {
 				htmlMatch = true
 				matchedConditions = append(matchedConditions, fmt.Sprintf("html =~ \"%s\" → 匹配到", truncateString(pattern, 50)))
+				logx.Infof("matchWappalyzer: html pattern MATCHED")
 				break
 			}
 		}
 		if !htmlMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: html check FAILED, allMatch=false")
 		}
 	}
 
@@ -1708,11 +1796,13 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		// 提取所有script src
 		scriptSrcRe := regexp.MustCompile(`(?i)<script[^>]*src=["']([^"']+)["']`)
 		scriptSrcs := scriptSrcRe.FindAllStringSubmatch(data.Body, -1)
+		logx.Infof("matchWappalyzer: checking scripts, patterns=%d, found %d script srcs", len(fp.Scripts), len(scriptSrcs))
 		for _, pattern := range fp.Scripts {
 			for _, src := range scriptSrcs {
 				if len(src) > 1 && matchRegexOrContains(src[1], pattern) {
 					scriptMatch = true
 					matchedConditions = append(matchedConditions, fmt.Sprintf("scripts =~ \"%s\" → 匹配到: %s", truncateString(pattern, 50), truncateString(src[1], 80)))
+					logx.Infof("matchWappalyzer: script pattern=%q MATCHED src=%q", pattern, truncateString(src[1], 80))
 					break
 				}
 			}
@@ -1722,6 +1812,7 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		}
 		if !scriptMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: scripts check FAILED, allMatch=false")
 		}
 	}
 
@@ -1731,11 +1822,13 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		scriptSrcMatch := false
 		scriptSrcRe := regexp.MustCompile(`(?i)<script[^>]*src=["']([^"']+)["']`)
 		scriptSrcs := scriptSrcRe.FindAllStringSubmatch(data.Body, -1)
+		logx.Infof("matchWappalyzer: checking scriptSrc, patterns=%d, found %d script srcs", len(fp.ScriptSrc), len(scriptSrcs))
 		for _, pattern := range fp.ScriptSrc {
 			for _, src := range scriptSrcs {
 				if len(src) > 1 && matchRegexOrContains(src[1], pattern) {
 					scriptSrcMatch = true
 					matchedConditions = append(matchedConditions, fmt.Sprintf("scriptSrc =~ \"%s\" → 匹配到: %s", truncateString(pattern, 50), truncateString(src[1], 80)))
+					logx.Infof("matchWappalyzer: scriptSrc pattern=%q MATCHED src=%q", pattern, truncateString(src[1], 80))
 					break
 				}
 			}
@@ -1745,6 +1838,7 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		}
 		if !scriptSrcMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: scriptSrc check FAILED, allMatch=false")
 		}
 	}
 
@@ -1752,17 +1846,25 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 	if len(fp.Cookies) > 0 && allMatch {
 		hasRule = true
 		cookieMatch := false
+		// 同时检查Cookies字段和header中的Set-Cookie（与扫描器一致）
+		cookieStr := data.Cookies
+		if cookieStr == "" && data.Headers != nil {
+			cookieStr = strings.Join(data.Headers["Set-Cookie"], " ")
+		}
+		logx.Infof("matchWappalyzer: checking cookies, keys=%v, cookieStr=%q", fp.Cookies, truncateString(cookieStr, 100))
 		for key, pattern := range fp.Cookies {
-			if containsIgnoreCase(data.Cookies, key) {
-				if pattern == "" || matchRegexOrContains(data.Cookies, pattern) {
+			if containsIgnoreCase(cookieStr, key) {
+				if pattern == "" || matchRegexOrContains(cookieStr, pattern) {
 					cookieMatch = true
 					matchedConditions = append(matchedConditions, fmt.Sprintf("cookie[%s] =~ \"%s\" → 匹配到", key, pattern))
+					logx.Infof("matchWappalyzer: cookie[%s] MATCHED", key)
 					break
 				}
 			}
 		}
 		if !cookieMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: cookies check FAILED, allMatch=false")
 		}
 	}
 
@@ -1770,10 +1872,8 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 	if len(fp.Meta) > 0 && allMatch {
 		hasRule = true
 		metaMatch := false
+		logx.Infof("matchWappalyzer: checking meta, keys=%v", fp.Meta)
 		for key, pattern := range fp.Meta {
-			// 在body中搜索meta标签，支持多种格式
-			// 格式1: <meta name="xxx" content="yyy">
-			// 格式2: <meta content="yyy" name="xxx">
 			metaPatterns := []string{
 				fmt.Sprintf(`(?i)<meta[^>]*name=["']?%s["']?[^>]*content=["']([^"']*)["']`, regexp.QuoteMeta(key)),
 				fmt.Sprintf(`(?i)<meta[^>]*content=["']([^"']*)["'][^>]*name=["']?%s["']?`, regexp.QuoteMeta(key)),
@@ -1784,6 +1884,7 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 					if pattern == "" || matchRegexOrContains(matches[1], pattern) {
 						metaMatch = true
 						matchedConditions = append(matchedConditions, fmt.Sprintf("meta[%s] =~ \"%s\" → 匹配到: %s", key, pattern, truncateString(matches[1], 80)))
+						logx.Infof("matchWappalyzer: meta[%s] MATCHED content=%q", key, truncateString(matches[1], 80))
 						break
 					}
 				}
@@ -1794,6 +1895,7 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 		}
 		if !metaMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: meta check FAILED, allMatch=false")
 		}
 	}
 
@@ -1801,15 +1903,18 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 	if len(fp.CSS) > 0 && allMatch {
 		hasRule = true
 		cssMatch := false
+		logx.Infof("matchWappalyzer: checking css, patterns=%v", fp.CSS)
 		for _, pattern := range fp.CSS {
 			if matchRegexOrContains(data.Body, pattern) {
 				cssMatch = true
 				matchedConditions = append(matchedConditions, fmt.Sprintf("css =~ \"%s\" → 匹配到", truncateString(pattern, 50)))
+				logx.Infof("matchWappalyzer: css pattern=%q MATCHED", pattern)
 				break
 			}
 		}
 		if !cssMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: css check FAILED, allMatch=false")
 		}
 	}
 
@@ -1817,17 +1922,22 @@ func matchWappalyzerRulesWithDetails(fp *model.Fingerprint, data *FingerprintDat
 	if len(fp.URL) > 0 && allMatch {
 		hasRule = true
 		urlMatch := false
+		logx.Infof("matchWappalyzer: checking url, patterns=%v, data.URL=%s", fp.URL, data.URL)
 		for _, pattern := range fp.URL {
 			if matchRegexOrContains(data.URL, pattern) {
 				urlMatch = true
 				matchedConditions = append(matchedConditions, fmt.Sprintf("url =~ \"%s\" → 匹配到: %s", truncateString(pattern, 50), data.URL))
+				logx.Infof("matchWappalyzer: url pattern=%q MATCHED", pattern)
 				break
 			}
 		}
 		if !urlMatch {
 			allMatch = false
+			logx.Infof("matchWappalyzer: url check FAILED, allMatch=false")
 		}
 	}
+
+	logx.Infof("matchWappalyzer: result hasRule=%v, allMatch=%v", hasRule, allMatch)
 
 	if hasRule && allMatch {
 		return true, matchedConditions
