@@ -464,7 +464,7 @@ type TaskConfig struct {
 	PortIdentify *PortIdentifyConfig `json:"portidentify,omitempty"` // 端口识别（Nmap服务识别）
 	DomainScan   *DomainScanConfig   `json:"domainscan,omitempty"`
 	Fingerprint  *FingerprintConfig  `json:"fingerprint,omitempty"`
-	BruteScan    *BruteScanConfig    `json:"brutescan,omitempty"`  // 弱口令扫描
+	BruteScan    *BruteScanConfig    `json:"brutescan,omitempty"` // 弱口令扫描
 	PocScan      *PocScanConfig      `json:"pocscan,omitempty"`
 	DirScan      *DirScanConfig      `json:"dirscan,omitempty"`  // 目录扫描
 	JSFinder     *JSFinderConfig     `json:"jsfinder,omitempty"` // JS 敏感信息与未授权检测
@@ -486,14 +486,14 @@ type JSFinderConfig struct {
 // BruteScanConfig 弱口令扫描配置
 type BruteScanConfig struct {
 	Enable          bool     `json:"enable"`
-	Services        []string `json:"services"`          // 服务列表: ssh,mysql,redis,mongodb,postgresql,mssql,ftp,snmp,oracle,smb,mqtt
-	Threads         int      `json:"threads"`          // 并发线程数
-	Timeout         int      `json:"timeout"`          // 单次连接超时(秒)
+	Services        []string `json:"services"`        // 服务列表: ssh,mysql,redis,mongodb,postgresql,mssql,ftp,snmp,oracle,smb,mqtt
+	Threads         int      `json:"threads"`         // 并发线程数
+	Timeout         int      `json:"timeout"`         // 单次连接超时(秒)
 	DelayMs         int      `json:"delayMs"`         // 每次尝试间隔(毫秒)
-	WeakpassDictIds []string `json:"weakpassDictIds"`  // 字典ID列表
-	UseDefaultDict  bool     `json:"useDefaultDict"`   // 是否使用默认字典
+	WeakpassDictIds []string `json:"weakpassDictIds"` // 字典ID列表
+	UseDefaultDict  bool     `json:"useDefaultDict"`  // 是否使用默认字典
 	StopOnFirst     bool     `json:"stopOnFirst"`     // 发现一个弱口令即停止
-	ForceScan       bool     `json:"forceScan"`        // 强制扫描（不检测端口开放状态）
+	ForceScan       bool     `json:"forceScan"`       // 强制扫描（不检测端口开放状态）
 }
 
 // DirScanConfig 目录扫描配置

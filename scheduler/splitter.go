@@ -1,9 +1,10 @@
 package scheduler
 
 import (
-	"cscan/scanner"
 	"fmt"
 	"strings"
+
+	"cscan/scanner"
 )
 
 // ChunkConfig 分片配置

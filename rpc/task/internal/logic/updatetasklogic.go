@@ -290,7 +290,7 @@ func (l *UpdateTaskLogic) sendTaskNotification(workspaceId, mainTaskId, status s
 	if globalHighRiskFilter != nil && globalHighRiskFilter.Enabled {
 		l.Logger.Infof("sendTaskNotification: global filter is enabled, fingerprints=%v, ports=%v, severities=%v",
 			globalHighRiskFilter.HighRiskFingerprints, globalHighRiskFilter.HighRiskPorts, globalHighRiskFilter.HighRiskPocSeverities)
-		
+
 		for i := range configItems {
 			if configItems[i].HighRiskFilter == nil {
 				// 没有 HighRiskFilter，直接使用全局配置
@@ -302,7 +302,7 @@ func (l *UpdateTaskLogic) sendTaskNotification(workspaceId, mainTaskId, status s
 					len(configItems[i].HighRiskFilter.HighRiskPorts) > 0 ||
 					len(configItems[i].HighRiskFilter.HighRiskPocSeverities) > 0 ||
 					configItems[i].HighRiskFilter.NewAssetNotify
-				
+
 				if !hasValidFilter {
 					// 启用了过滤但没有设置条件，使用全局配置
 					configItems[i].HighRiskFilter = globalHighRiskFilter
@@ -467,8 +467,8 @@ func (l *UpdateTaskLogic) loadGlobalHighRiskFilter() *notify.HighRiskFilter {
 	collection := l.svcCtx.MongoDB.Collection("system_config")
 
 	var result struct {
-		Key    string        `bson:"key"`
-		Config bson.Raw      `bson:"config"`
+		Key    string   `bson:"key"`
+		Config bson.Raw `bson:"config"`
 	}
 
 	err := collection.FindOne(l.ctx, bson.M{"key": "high_risk_filter_config"}).Decode(&result)

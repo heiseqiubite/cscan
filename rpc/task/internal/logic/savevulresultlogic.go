@@ -42,14 +42,14 @@ func (c *AssetCache) getOrCreate(ctx context.Context, assetModel *model.AssetMod
 	if asset == nil {
 		// 资产不存在，创建一个新的
 		asset = &model.Asset{
-			Host:        host,
-			Port:        port,
-			Authority:   fmt.Sprintf("%s:%d", host, port),
-			Service:     "http",
-			IsHTTP:      true,
-			Source:      "poc_scan",
-			CreateTime:  time.Now(),
-			UpdateTime:  time.Now(),
+			Host:       host,
+			Port:       port,
+			Authority:  fmt.Sprintf("%s:%d", host, port),
+			Service:    "http",
+			IsHTTP:     true,
+			Source:     "poc_scan",
+			CreateTime: time.Now(),
+			UpdateTime: time.Now(),
 		}
 		// 设置 HTTPS 端口
 		if port == 443 || port == 8443 {
@@ -243,7 +243,7 @@ func (l *SaveVulResultLogic) SaveVulResult(in *pb.SaveVulResultReq) (*pb.SaveVul
 		// Update asset with risk score
 		update := bson.M{
 			"last_scan_time": time.Now(),
-			"vul_count":     assetVulCount[key],
+			"vul_count":      assetVulCount[key],
 		}
 
 		// Update if new score is higher

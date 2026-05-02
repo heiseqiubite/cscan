@@ -315,22 +315,22 @@ func (m *CronManager) startTask(task *CronTask) {
 		task.timer = time.NewTimer(duration)
 		// 记录启动时的任务对象指针，用于检测 ReloadTask 是否替换了任务
 		originalTask := task
-	go func(t *CronTask) {
-		<-t.timer.C
-		m.mu.Lock()
-		currentTask, ok := m.tasks[t.Id]
-		enabled := ok && currentTask.Status == "enable"
-		// 清理已触发的 timer 引用
-		// 只有当内存中的任务对象仍然是启动时的对象时，才清理 timer
-		// 如果 ReloadTask 已替换任务对象，新对象有自己的 timer，不需要清理
-		if ok && currentTask == originalTask {
-			currentTask.timer = nil
-		}
-		m.mu.Unlock()
-		if enabled {
-			m.executeTask(currentTask)
-		}
-	}(task)
+		go func(t *CronTask) {
+			<-t.timer.C
+			m.mu.Lock()
+			currentTask, ok := m.tasks[t.Id]
+			enabled := ok && currentTask.Status == "enable"
+			// 清理已触发的 timer 引用
+			// 只有当内存中的任务对象仍然是启动时的对象时，才清理 timer
+			// 如果 ReloadTask 已替换任务对象，新对象有自己的 timer，不需要清理
+			if ok && currentTask == originalTask {
+				currentTask.timer = nil
+			}
+			m.mu.Unlock()
+			if enabled {
+				m.executeTask(currentTask)
+			}
+		}(task)
 	} else {
 		// Cron表达式
 		if task.CronSpec == "" {
@@ -458,15 +458,15 @@ func (m *CronManager) executeTask(task *CronTask) {
 		cronTaskId, workspaceId, mainTaskId, taskName, target, config string
 		lastRunTime, nextRunTime, status                              string
 	}{
-		cronTaskId: currentTask.Id,
+		cronTaskId:  currentTask.Id,
 		workspaceId: currentTask.WorkspaceId,
-		mainTaskId: currentTask.MainTaskId,
-		taskName: currentTask.Name,
-		target: currentTask.Target,
-		config: currentTask.Config,
+		mainTaskId:  currentTask.MainTaskId,
+		taskName:    currentTask.Name,
+		target:      currentTask.Target,
+		config:      currentTask.Config,
 		lastRunTime: currentTask.LastRunTime,
 		nextRunTime: currentTask.NextRunTime,
-		status: currentTask.Status,
+		status:      currentTask.Status,
 	}
 
 	// 序列化当前任务状态（锁内完成，保证一致性）

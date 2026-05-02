@@ -26,7 +26,7 @@ func NewGetCustomFingerprintsLogic(ctx context.Context, svcCtx *svc.ServiceConte
 
 // 获取自定义指纹
 func (l *GetCustomFingerprintsLogic) GetCustomFingerprints(in *pb.GetCustomFingerprintsReq) (*pb.GetCustomFingerprintsResp, error) {
-	var fingerprints []pb.FingerprintDocument
+	fingerprints := make([]*pb.FingerprintDocument, 0)
 
 	// 构建查询条件
 	filter := bson.M{}
@@ -44,9 +44,9 @@ func (l *GetCustomFingerprintsLogic) GetCustomFingerprints(in *pb.GetCustomFinge
 		}, nil
 	}
 
-	// 转换为protobuf格式
+	// 转换为protobuf格式（使用指针避免拷贝 protobuf 内部锁）
 	for _, fp := range fps {
-		pbFp := pb.FingerprintDocument{
+		pbFp := &pb.FingerprintDocument{
 			Id:        fp.Id.Hex(),
 			Name:      fp.Name,
 			Category:  fp.Category,
@@ -69,16 +69,7 @@ func (l *GetCustomFingerprintsLogic) GetCustomFingerprints(in *pb.GetCustomFinge
 	return &pb.GetCustomFingerprintsResp{
 		Success:      true,
 		Message:      "success",
-		Fingerprints: convertFingerprintSlice(fingerprints),
+		Fingerprints: fingerprints,
 		Count:        int32(len(fingerprints)),
 	}, nil
-}
-
-// convertFingerprintSlice 转换指纹切片为指针切片
-func convertFingerprintSlice(fps []pb.FingerprintDocument) []*pb.FingerprintDocument {
-	result := make([]*pb.FingerprintDocument, len(fps))
-	for i := range fps {
-		result[i] = &fps[i]
-	}
-	return result
 }
