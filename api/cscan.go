@@ -287,7 +287,9 @@ func createAndPushCronTask(ctx context.Context, svcCtx *svc.ServiceContext, sche
 		batches = []string{msg.Target}
 	}
 
-	subTaskCount := len(batches) * enabledModules
+	// 子任务计数器在 worker 端每完成一个子任务（一个 batch 的全部阶段）才递增一次，
+	// 因此 subTaskCount 必须等于 batches 数量，否则任务永远卡在 progress<100% 而不会被标记为 SUCCESS。
+	subTaskCount := len(batches)
 
 	// 更新任务状态为 STARTED
 	now := time.Now()

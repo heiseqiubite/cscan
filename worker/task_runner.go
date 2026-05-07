@@ -251,10 +251,15 @@ func (r *TaskRunner) Run(ctx context.Context, task *scheduler.TaskInfo, worker *
 		// 标记阶段完成
 		taskCtx.CompletedPhases[phaseConfig.Phase] = true
 
-		// 递增子任务完成计数
+		// 更新阶段进度（不递增计数器）
 		if worker != nil {
-			worker.incrSubTaskDone(ctx, task, phaseConfig.Name)
+			worker.incrSubTaskDone(ctx, task, phaseConfig.Name, false)
 		}
+	}
+
+	// 子任务全部阶段完成，递增主任务计数器
+	if worker != nil {
+		worker.incrSubTaskDone(ctx, task, "完成", true)
 	}
 
 	return r.buildResult(taskCtx, startTime, nil)

@@ -20,6 +20,7 @@ type WorkerSubTaskDoneReq struct {
 	MainTaskId  string `json:"mainTaskId"`
 	WorkspaceId string `json:"workspaceId"`
 	Phase       string `json:"phase"`
+	IsCompleted bool   `json:"isCompleted"`
 }
 
 // WorkerSubTaskDoneResp 子任务完成响应
@@ -55,6 +56,7 @@ func WorkerSubTaskDoneHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			MainTaskId:  req.MainTaskId,
 			WorkspaceId: req.WorkspaceId,
 			Phase:       req.Phase,
+			IsCompleted: req.IsCompleted,
 		}
 
 		rpcResp, err := svcCtx.TaskRpcClient.IncrSubTaskDone(r.Context(), rpcReq)

@@ -3656,10 +3656,11 @@ func (x *GetSubfinderProvidersResp) GetCount() int32 {
 // 递增子任务完成数请求（模块级别）
 type IncrSubTaskDoneReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=taskId,proto3" json:"taskId,omitempty"`           // 子任务ID
-	MainTaskId    string                 `protobuf:"bytes,2,opt,name=mainTaskId,proto3" json:"mainTaskId,omitempty"`   // 主任务ID (MongoDB ObjectID)
-	WorkspaceId   string                 `protobuf:"bytes,3,opt,name=workspaceId,proto3" json:"workspaceId,omitempty"` // 工作空间ID
-	Phase         string                 `protobuf:"bytes,4,opt,name=phase,proto3" json:"phase,omitempty"`             // 完成的阶段名称
+	TaskId        string                 `protobuf:"bytes,1,opt,name=taskId,proto3" json:"taskId,omitempty"`            // 子任务ID
+	MainTaskId    string                 `protobuf:"bytes,2,opt,name=mainTaskId,proto3" json:"mainTaskId,omitempty"`    // 主任务ID (MongoDB ObjectID)
+	WorkspaceId   string                 `protobuf:"bytes,3,opt,name=workspaceId,proto3" json:"workspaceId,omitempty"`  // 工作空间ID
+	Phase         string                 `protobuf:"bytes,4,opt,name=phase,proto3" json:"phase,omitempty"`              // 完成的阶段名称
+	IsCompleted   bool                   `protobuf:"varint,5,opt,name=isCompleted,proto3" json:"isCompleted,omitempty"` // 是否子任务全部阶段完成（仅此时递增计数器）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3720,6 +3721,13 @@ func (x *IncrSubTaskDoneReq) GetPhase() string {
 		return x.Phase
 	}
 	return ""
+}
+
+func (x *IncrSubTaskDoneReq) GetIsCompleted() bool {
+	if x != nil {
+		return x.IsCompleted
+	}
+	return false
 }
 
 // 递增子任务完成数响应
@@ -4175,14 +4183,15 @@ const file_rpc_task_task_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12=\n" +
 	"\tproviders\x18\x03 \x03(\v2\x1f.task.SubfinderProviderDocumentR\tproviders\x12\x14\n" +
-	"\x05count\x18\x04 \x01(\x05R\x05count\"\x84\x01\n" +
+	"\x05count\x18\x04 \x01(\x05R\x05count\"\xa6\x01\n" +
 	"\x12IncrSubTaskDoneReq\x12\x16\n" +
 	"\x06taskId\x18\x01 \x01(\tR\x06taskId\x12\x1e\n" +
 	"\n" +
 	"mainTaskId\x18\x02 \x01(\tR\n" +
 	"mainTaskId\x12 \n" +
 	"\vworkspaceId\x18\x03 \x01(\tR\vworkspaceId\x12\x14\n" +
-	"\x05phase\x18\x04 \x01(\tR\x05phase\"\xa9\x01\n" +
+	"\x05phase\x18\x04 \x01(\tR\x05phase\x12 \n" +
+	"\visCompleted\x18\x05 \x01(\bR\visCompleted\"\xa9\x01\n" +
 	"\x13IncrSubTaskDoneResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12 \n" +

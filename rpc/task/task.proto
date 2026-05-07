@@ -464,6 +464,7 @@ message IncrSubTaskDoneReq {
   string mainTaskId = 2;    // 主任务ID (MongoDB ObjectID)
   string workspaceId = 3;   // 工作空间ID
   string phase = 4;         // 完成的阶段名称
+  bool isCompleted = 5;     // 是否子任务全部阶段完成（仅此时递增计数器）
 }
 
 // 递增子任务完成数响应

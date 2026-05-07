@@ -62,8 +62,10 @@ func (b *TaskBuilder) BuildAndPushSubTasks(workspaceId string, task *model.MainT
 	}(timeoutCtx, cancel)
 
 	// 3. Calculate SubTask Count
+	// 子任务计数器在 worker 端每完成一个子任务（一个 batch 的全部阶段）才递增一次，
+	// 因此 subTaskCount 必须等于 batches 数量，否则任务永远卡在 progress<100% 而不会被标记为 SUCCESS。
 	enabledModules := b.countEnabledModules(taskConfig)
-	subTaskCount := len(batches) * enabledModules
+	subTaskCount := len(batches)
 
 	// 4. Update Main Task Status
 	now := time.Now()
