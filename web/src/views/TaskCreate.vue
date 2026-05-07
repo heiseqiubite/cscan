@@ -1122,7 +1122,7 @@ const form = reactive({
   // 端口识别
   portidentifyEnable: false,
   portidentifyTool: 'nmap',
-  portidentifyTimeout: 30,
+  portidentifyTimeout: 60,
   portidentifyConcurrency: 10,
   portidentifyArgs: '-sV -version-intensity 5',
   portidentifyUDP: false,
