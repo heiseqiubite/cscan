@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"cscan/model"
 	"cscan/pkg/notify"
 	"cscan/rpc/task/internal/svc"
 	"cscan/rpc/task/pb"
@@ -31,8 +30,7 @@ func NewIncrSubTaskDoneLogic(ctx context.Context, svcCtx *svc.ServiceContext) *I
 }
 
 // 递增子任务完成数（模块级别）
-// 使用原子操作防止并发导致计数超过上限
-// 仅当 isCompleted=true 时才递增计数器，中间阶段调用仅更新进度
+// 每完成一个扫描模块即递增计数器，subTaskCount = 目标数 × 模块数
 func (l *IncrSubTaskDoneLogic) IncrSubTaskDone(in *pb.IncrSubTaskDoneReq) (*pb.IncrSubTaskDoneResp, error) {
 	l.Logger.Infof("IncrSubTaskDone: taskId=%s, mainTaskId=%s, phase=%s, isCompleted=%v", in.TaskId, in.MainTaskId, in.Phase, in.IsCompleted)
 
@@ -43,65 +41,45 @@ func (l *IncrSubTaskDoneLogic) IncrSubTaskDone(in *pb.IncrSubTaskDoneReq) (*pb.I
 		}, nil
 	}
 
-	// 获取任务模型
 	taskModel := l.svcCtx.GetMainTaskModel(in.WorkspaceId)
 
-	var task *model.MainTask
-	var allDone bool
-
-	// 仅当子任务全部阶段完成时才递增计数器
-	if in.IsCompleted {
-		// 使用原子操作递增 sub_task_done，防止超过上限
-		t, incremented, err := taskModel.IncrSubTaskDoneAtomic(l.ctx, in.MainTaskId)
-		if err != nil {
-			l.Logger.Errorf("IncrSubTaskDone: failed to incr atomic, mainTaskId=%s, error=%v", in.MainTaskId, err)
-			return &pb.IncrSubTaskDoneResp{
-				Success: false,
-				Message: err.Error(),
-			}, nil
-		}
-		task = t
-
-		if !incremented {
-			l.Logger.Infof("IncrSubTaskDone: already at limit, mainTaskId=%s, done=%d, total=%d",
-				in.MainTaskId, task.SubTaskDone, task.SubTaskCount)
-		}
-
-		allDone = task.SubTaskDone >= task.SubTaskCount
-		l.Logger.Infof("IncrSubTaskDone: mainTaskId=%s, phase=%s, done=%d, total=%d, allDone=%v, incremented=%v",
-			in.MainTaskId, in.Phase, task.SubTaskDone, task.SubTaskCount, allDone, incremented)
-	} else {
-		// 中间阶段：仅获取当前任务状态用于进度计算
-		t, err := taskModel.FindById(l.ctx, in.MainTaskId)
-		if err != nil {
-			l.Logger.Errorf("IncrSubTaskDone: failed to find task, mainTaskId=%s, error=%v", in.MainTaskId, err)
-			return &pb.IncrSubTaskDoneResp{
-				Success: false,
-				Message: err.Error(),
-			}, nil
-		}
-		task = t
-		allDone = false
-		l.Logger.Infof("IncrSubTaskDone: progress update only, mainTaskId=%s, phase=%s, done=%d, total=%d",
-			in.MainTaskId, in.Phase, task.SubTaskDone, task.SubTaskCount)
+	// 每次模块完成都原子递增计数器（递增数量 = 目标数）
+	incrAmount := int(in.IncrAmount)
+	if incrAmount <= 0 {
+		incrAmount = 1
+	}
+	task, incremented, err := taskModel.IncrSubTaskDoneAtomic(l.ctx, in.MainTaskId, incrAmount)
+	if err != nil {
+		l.Logger.Errorf("IncrSubTaskDone: failed to incr atomic, mainTaskId=%s, error=%v", in.MainTaskId, err)
+		return &pb.IncrSubTaskDoneResp{
+			Success: false,
+			Message: err.Error(),
+		}, nil
 	}
 
-	// 计算进度百分比，确保不超过100
+	if !incremented {
+		l.Logger.Infof("IncrSubTaskDone: already at limit, mainTaskId=%s, done=%d, total=%d",
+			in.MainTaskId, task.SubTaskDone, task.SubTaskCount)
+	}
+
+	allDone := task.SubTaskDone >= task.SubTaskCount
+	l.Logger.Infof("IncrSubTaskDone: mainTaskId=%s, phase=%s, done=%d, total=%d, allDone=%v, incremented=%v",
+		in.MainTaskId, in.Phase, task.SubTaskDone, task.SubTaskCount, allDone, incremented)
+
+	// 进度 = 已完成模块数 / 总模块数 × 100
 	progress := calculateProgress(task.SubTaskDone, task.SubTaskCount)
+
+	// 更新任务进度和当前阶段
+	if err := taskModel.Update(l.ctx, in.MainTaskId, bson.M{
+		"progress":      progress,
+		"current_phase": in.Phase,
+	}); err != nil {
+		l.Logger.Errorf("IncrSubTaskDone: failed to update progress, mainTaskId=%s, error=%v", in.MainTaskId, err)
+	}
 
 	// 更新任务进度到恢复管理器
 	if err := l.svcCtx.TaskRecoveryManager.UpdateTaskProgress(in.TaskId, in.Phase, progress); err != nil {
 		l.Logger.Errorf("IncrSubTaskDone: failed to update recovery progress: %v", err)
-	}
-
-	// 更新进度和当前阶段
-	update := bson.M{
-		"progress":      progress,
-		"current_phase": in.Phase,
-	}
-
-	if err := taskModel.Update(l.ctx, in.MainTaskId, update); err != nil {
-		l.Logger.Errorf("IncrSubTaskDone: failed to update progress, mainTaskId=%s, error=%v", in.MainTaskId, err)
 	}
 
 	// 更新分片状态（如果是分片任务）

@@ -203,6 +203,7 @@ type SubTaskDoneReq struct {
 	WorkspaceId string `json:"workspaceId"`
 	Phase       string `json:"phase"`
 	IsCompleted bool   `json:"isCompleted"`
+	IncrAmount  int    `json:"incrAmount"`
 }
 
 // SubTaskDoneResp 子任务完成响应

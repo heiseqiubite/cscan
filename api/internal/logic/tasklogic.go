@@ -931,15 +931,15 @@ func (l *MainTaskPauseLogic) MainTaskPause(req *types.MainTaskControlReq, worksp
 	l.svcCtx.RedisClient.Set(l.ctx, ctrlKey, "PAUSE", 24*time.Hour)
 	l.svcCtx.RedisClient.Publish(l.ctx, ctrlKey, "PAUSE")
 
-	// 2. 如果有子任务，也发送给所有子任务
-	if task.SubTaskCount > 1 {
-		for i := 0; i < task.SubTaskCount; i++ {
+	// 2. 如果有子任务，也发送给所有子任务（按 BatchCount 分发）
+	if task.BatchCount > 1 {
+		for i := 0; i < task.BatchCount; i++ {
 			subTaskId := fmt.Sprintf("%s-%d", task.TaskId, i)
 			subCtrlKey := "cscan:task:ctrl:" + subTaskId
 			l.svcCtx.RedisClient.Set(l.ctx, subCtrlKey, "PAUSE", 24*time.Hour)
 			l.svcCtx.RedisClient.Publish(l.ctx, subCtrlKey, "PAUSE")
 		}
-		l.Logger.Infof("Task pause signal sent to %d sub-tasks", task.SubTaskCount)
+		l.Logger.Infof("Task pause signal sent to %d sub-tasks", task.BatchCount)
 	}
 
 	// 更新状态为PAUSED
@@ -1021,14 +1021,14 @@ func (l *MainTaskResumeLogic) MainTaskResume(req *types.MainTaskControlReq, work
 	ctrlKey := "cscan:task:ctrl:" + task.TaskId
 	l.svcCtx.RedisClient.Del(l.ctx, ctrlKey)
 
-	// 如果有子任务，也清除所有子任务的暂停信号
-	if task.SubTaskCount > 1 {
-		for i := 0; i < task.SubTaskCount; i++ {
+	// 如果有子任务，也清除所有子任务的暂停信号（按 BatchCount 分发）
+	if task.BatchCount > 1 {
+		for i := 0; i < task.BatchCount; i++ {
 			subTaskId := fmt.Sprintf("%s-%d", task.TaskId, i)
 			subCtrlKey := "cscan:task:ctrl:" + subTaskId
 			l.svcCtx.RedisClient.Del(l.ctx, subCtrlKey)
 		}
-		l.Logger.Infof("MainTaskResume: cleared pause signals for %d sub-tasks", task.SubTaskCount)
+		l.Logger.Infof("MainTaskResume: cleared pause signals for %d sub-tasks", task.BatchCount)
 	}
 
 	// 更新状态为STARTED
@@ -1197,15 +1197,15 @@ func (l *MainTaskStopLogic) MainTaskStop(req *types.MainTaskControlReq, workspac
 	l.svcCtx.RedisClient.Set(l.ctx, ctrlKey, "STOP", 24*time.Hour)
 	l.svcCtx.RedisClient.Publish(l.ctx, ctrlKey, "STOP")
 
-	// 2. 如果有子任务，也发送给所有子任务
-	if task.SubTaskCount > 1 {
-		for i := 0; i < task.SubTaskCount; i++ {
+	// 2. 如果有子任务，也发送给所有子任务（按 BatchCount 分发）
+	if task.BatchCount > 1 {
+		for i := 0; i < task.BatchCount; i++ {
 			subTaskId := fmt.Sprintf("%s-%d", task.TaskId, i)
 			subCtrlKey := "cscan:task:ctrl:" + subTaskId
 			l.svcCtx.RedisClient.Set(l.ctx, subCtrlKey, "STOP", 24*time.Hour)
 			l.svcCtx.RedisClient.Publish(l.ctx, subCtrlKey, "STOP")
 		}
-		l.Logger.Infof("Task stop signal sent to %d sub-tasks", task.SubTaskCount)
+		l.Logger.Infof("Task stop signal sent to %d sub-tasks", task.BatchCount)
 	}
 
 	// 更新状态为STOPPED，设置结束时间

@@ -47,8 +47,9 @@ type MainTask struct {
 	Config       string `bson:"config" json:"config"`              // 任务配置JSON
 	CurrentPhase string `bson:"current_phase" json:"currentPhase"` // 当前执行阶段
 	// 子任务拆分（用于分布式并发）
-	SubTaskCount int `bson:"sub_task_count" json:"subTaskCount"` // 子任务总数
+	SubTaskCount int `bson:"sub_task_count" json:"subTaskCount"` // 子任务总数（目标数 × 模块数，用于进度计算）
 	SubTaskDone  int `bson:"sub_task_done" json:"subTaskDone"`   // 已完成子任务数
+	BatchCount   int `bson:"batch_count" json:"batchCount"`      // 批次数（用于暂停/停止信号分发）
 }
 
 type ExecutorTask struct {
@@ -239,10 +240,14 @@ func (m *MainTaskModel) IncrSubTaskDone(ctx context.Context, id string) error {
 // 使用 FindOneAndUpdate 实现原子操作，防止并发导致计数超过上限
 // 返回更新后的文档，如果已达上限则返回当前文档但不递增
 // 返回值: (更新后的任务, 是否实际递增了, 错误)
-func (m *MainTaskModel) IncrSubTaskDoneAtomic(ctx context.Context, id string) (*MainTask, bool, error) {
+func (m *MainTaskModel) IncrSubTaskDoneAtomic(ctx context.Context, id string, incrAmount int) (*MainTask, bool, error) {
 	oid, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, false, err
+	}
+
+	if incrAmount <= 0 {
+		incrAmount = 1
 	}
 
 	now := time.Now()
@@ -257,7 +262,7 @@ func (m *MainTaskModel) IncrSubTaskDoneAtomic(ctx context.Context, id string) (*
 	}
 
 	update := bson.M{
-		"$inc": bson.M{"sub_task_done": 1},
+		"$inc": bson.M{"sub_task_done": incrAmount},
 		"$set": bson.M{"update_time": now},
 	}
 

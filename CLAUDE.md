@@ -499,6 +499,9 @@ cd web && npm install && npm run dev    # 开发服务器 (:3000)，代理 /api 
 ### 5.2 构建命令
 
 ```bash
+# Protobuf 代码生成（修改 .proto 文件后必须执行）
+protoc -I rpc/task --go_out=rpc/task/pb --go_opt=paths=source_relative --go-grpc_out=rpc/task/pb --go-grpc_opt=paths=source_relative task.proto
+
 # Go 后端
 go build -o cscan ./api/cscan.go       # 构建 API 服务
 go build -o worker ./worker/            # 构建 Worker
