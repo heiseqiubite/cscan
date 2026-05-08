@@ -1,11 +1,15 @@
-FROM golang:1.25.7-alpine AS builder
+# ============ 编译阶段 ============
+# 使用 Debian 基础镜像，便于 ksubdomain 的 CGO+libpcap 与运行时 glibc 兼容
+FROM golang:1.25.7-bookworm AS builder
 
 ARG VERSION
 
 WORKDIR /app
 
-# 安装编译依赖
-RUN apk add --no-cache git curl libpcap-dev gcc musl-dev
+# 安装编译依赖（libpcap-dev 给 ksubdomain CGO 用）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git curl libpcap-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件并下载
 COPY go.mod go.sum ./
@@ -17,38 +21,40 @@ COPY . .
 # 下载 ip2region 数据库（编译时准备）
 RUN mkdir -p /app/data && \
     curl -sL "https://github.com/lionsoul2014/ip2region/raw/master/data/ip2region_v4.xdb" -o /app/data/ip2region_v4.xdb && \
-    curl -sL "https://github.com/lionsoul2014/ip2region/raw/master/data/ip2region_v6.xdb" -o /app/data/ip2region_v6.xdb && \
-    echo "ip2region databases downloaded"
+    curl -sL "https://github.com/lionsoul2014/ip2region/raw/master/data/ip2region_v6.xdb" -o /app/data/ip2region_v6.xdb
 
-# 编译 worker
+# 编译 worker（纯 Go 静态二进制）
 RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" \
-    -o /cscan-worker ./cmd/worker/main.go
+        -o /cscan-worker ./cmd/worker/main.go
 
-# 安装 ksubdomain（需要 CGO 支持 libpcap）
+# 安装 ksubdomain（需要 CGO+libpcap，与运行时同 libc）
 RUN CGO_ENABLED=1 go install -v github.com/boy-hack/ksubdomain/v2/cmd/ksubdomain@latest
 
 # ============ 运行阶段 ============
-FROM alpine:3.19
+FROM debian:bookworm-slim
 
-# 安装运行时依赖 (包含 util-linux 用于 prlimit)
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    unzip \
-    nmap \
-    masscan \
-    curl \
-    bind-tools \
-    chromium \
-    font-noto-cjk \
-    util-linux \
-    libpcap
+# 运行时依赖：nmap 在 Debian 是单包齐全（自带 nse_main.lua 与 NSE 脚本），无需 NMAPDIR 环境变量
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        tzdata \
+        unzip \
+        nmap \
+        masscan \
+        curl \
+        dnsutils \
+        chromium \
+        fonts-noto-cjk \
+        util-linux \
+        libpcap0.8 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 构建期 fail-fast：确认 nmap NSE 引擎入口与脚本目录都在
+RUN test -f /usr/share/nmap/nse_main.lua \
+    && test -d /usr/share/nmap/scripts \
+    && nmap --version | head -1
 
 # 设置时区
 ENV TZ=Asia/Shanghai
-
-# 设置 Nmap 脚本引擎路径（Alpine nmap 包需要显式指定）
-ENV NMAPDIR=/usr/share/nmap
 
 # 复制 ip2region 数据库
 COPY --from=builder /app/data ./data/
@@ -57,14 +63,10 @@ COPY --from=builder /app/data ./data/
 COPY --from=builder /cscan-worker /cscan-worker
 COPY --from=builder /go/bin/ksubdomain /usr/local/bin/ksubdomain
 
-# 创建监控启动脚本
-RUN echo '#!/bin/sh' > /start.sh && \
-    echo '' >> /start.sh && \
-    echo '# 设置资源限制并启动进程' >> /start.sh && \
-    echo 'exec prlimit --nofile=65535:65535 /cscan-worker "$@"' >> /start.sh && \
-    chmod +x /start.sh
+# 启动脚本（prlimit 提升 fd 上限）
+RUN printf '#!/bin/sh\nexec prlimit --nofile=65535:65535 /cscan-worker "$@"\n' > /start.sh \
+    && chmod +x /start.sh
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD pgrep cscan-worker || exit 1
 

@@ -92,12 +92,22 @@ func loadTemplatesFromFiles() []model.ScanTemplate {
 		}
 
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+		isYAML := strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")
+		isJSON := strings.HasSuffix(name, ".json")
+		if !isYAML && !isJSON {
 			continue
 		}
 
 		filePath := filepath.Join(templateDir, name)
-		t, err := loadTemplateFromFile(filePath)
+		var t *model.ScanTemplate
+		var err error
+
+		if isJSON {
+			t, err = loadTemplateFromJSONFile(filePath)
+		} else {
+			t, err = loadTemplateFromYAMLFile(filePath)
+		}
+
 		if err != nil {
 			logx.Errorf("[TemplateInit] Failed to load template %s: %v", name, err)
 			continue
@@ -110,8 +120,8 @@ func loadTemplatesFromFiles() []model.ScanTemplate {
 	return templates
 }
 
-// loadTemplateFromFile 从单个文件加载模板
-func loadTemplateFromFile(filePath string) (*model.ScanTemplate, error) {
+// loadTemplateFromYAMLFile 从YAML文件加载模板
+func loadTemplateFromYAMLFile(filePath string) (*model.ScanTemplate, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -139,24 +149,187 @@ func loadTemplateFromFile(filePath string) (*model.ScanTemplate, error) {
 	}, nil
 }
 
+// loadTemplateFromJSONFile 从JSON文件加载模板
+// JSON文件格式与前端展示格式一致：顶层包含 name/target/template + 各扫描模块配置
+// 提取 name/description/category/tags/sort_number 作为模板元数据，
+// 其余字段（target/template/domainscan/portscan/...）作为 config 存储
+func loadTemplateFromJSONFile(filePath string) (*model.ScanTemplate, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	// 先解析为通用 map 提取元数据和配置
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	// 提取模板元数据
+	name, _ := raw["name"].(string)
+	description, _ := raw["description"].(string)
+	category, _ := raw["category"].(string)
+	sortNumber := 0
+	if sn, ok := raw["sort_number"].(float64); ok {
+		sortNumber = int(sn)
+	}
+	var tags []string
+	if t, ok := raw["tags"].([]interface{}); ok {
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	}
+
+	// 从原始 map 中移除元数据字段，剩余的即为 config
+	metaKeys := []string{"name", "description", "category", "tags", "sort_number"}
+	configMap := make(map[string]interface{})
+	for k, v := range raw {
+		isMeta := false
+		for _, mk := range metaKeys {
+			if k == mk {
+				isMeta = true
+				break
+			}
+		}
+		if !isMeta {
+			configMap[k] = v
+		}
+	}
+
+	configJSON, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.ScanTemplate{
+		Name:        name,
+		Description: description,
+		Category:    category,
+		Tags:        tags,
+		Config:      string(configJSON),
+		IsBuiltin:   true,
+		SortNumber:  sortNumber,
+	}, nil
+}
+
 // getDefaultTemplates 获取默认模板（当文件不存在时的后备方案）
 func getDefaultTemplates() []model.ScanTemplate {
+	quickScanConfig := map[string]interface{}{
+		"name":     "",
+		"target":   "",
+		"template": nil,
+		"domainscan": map[string]interface{}{
+			"enable": false, "subfinder": true, "timeout": 300, "maxEnumerationTime": 10,
+			"threads": 10, "rateLimit": 0, "removeWildcard": true, "resolveDNS": true,
+			"concurrent": 50, "subdomainDictIds": []interface{}{}, "bruteforceTimeout": 30,
+			"recursiveBrute": false, "recursiveDictIds": []interface{}{}, "wildcardDetect": false,
+		},
+		"portscan": map[string]interface{}{
+			"enable": true, "tool": "naabu", "rate": 3000,
+			"ports": "top100",
+			"portThreshold": 100, "scanType": "s", "timeout": 60, "skipHostDiscovery": false,
+			"excludeCDN": false, "excludeHosts": "", "workers": 50, "retries": 2,
+			"warmUpTime": 1, "verify": false,
+		},
+		"portidentify": map[string]interface{}{
+			"enable": false, "tool": "nmap", "timeout": 60, "concurrency": 10,
+			"args": "-sV -version-intensity 5", "udp": false, "fastMode": false, "forceScan": false,
+		},
+		"fingerprint": map[string]interface{}{
+			"enable": true, "tool": "httpx", "iconHash": true, "customEngine": true,
+			"screenshot": false, "activeScan": false, "activeTimeout": 10,
+			"targetTimeout": 30, "filterMode": "http_mapping", "forceScan": false,
+		},
+		"brutescan": map[string]interface{}{
+			"enable": false, "services": []interface{}{}, "threads": 20, "timeout": 5,
+			"delayMs": 100, "stopOnFirst": true, "forceScan": false,
+		},
+		"pocscan": map[string]interface{}{
+			"enable": false, "mode": "auto", "useNuclei": true, "forceScan": false,
+			"autoScan": true, "automaticScan": true, "customOnly": false,
+			"severity": "critical,high,medium,low,info,unknown", "targetTimeout": 600,
+			"nucleiTemplateIds": []interface{}{}, "customPocIds": []interface{}{},
+			"customHeaders": []interface{}{}, "customPocOnly": false,
+		},
+		"dirscan": map[string]interface{}{
+			"enable": false, "dictIds": []interface{}{}, "threads": 50, "timeout": 10,
+			"followRedirect": true, "forceScan": false, "autoCalibration": true,
+			"filterSize": "", "filterWords": "", "filterLines": "", "filterRegex": "",
+			"matcherMode": "or", "filterMode": "or", "rate": 0,
+			"recursion": false, "recursionDepth": 2,
+		},
+		"jsfinder": map[string]interface{}{
+			"enable": false, "threads": 10, "timeout": 10, "forceScan": false,
+		},
+	}
+
+	standardScanConfig := map[string]interface{}{
+		"name":     "",
+		"target":   "",
+		"template": nil,
+		"domainscan": map[string]interface{}{
+			"enable": false, "subfinder": true, "timeout": 300, "maxEnumerationTime": 10,
+			"threads": 10, "rateLimit": 0, "removeWildcard": true, "resolveDNS": true,
+			"concurrent": 50, "subdomainDictIds": []interface{}{}, "bruteforceTimeout": 30,
+			"recursiveBrute": false, "recursiveDictIds": []interface{}{}, "wildcardDetect": false,
+		},
+		"portscan": map[string]interface{}{
+			"enable": true, "tool": "naabu", "rate": 3000,
+			"ports": "top100",
+			"portThreshold": 100, "scanType": "s", "timeout": 60, "skipHostDiscovery": false,
+			"excludeCDN": false, "excludeHosts": "", "workers": 50, "retries": 2,
+			"warmUpTime": 1, "verify": false,
+		},
+		"portidentify": map[string]interface{}{
+			"enable": true, "tool": "nmap", "timeout": 60, "concurrency": 10,
+			"args": "-sV -version-intensity 5", "udp": false, "fastMode": false, "forceScan": false,
+		},
+		"fingerprint": map[string]interface{}{
+			"enable": true, "tool": "httpx", "iconHash": true, "customEngine": true,
+			"screenshot": true, "activeScan": true, "activeTimeout": 10,
+			"targetTimeout": 90, "filterMode": "http_mapping", "forceScan": false,
+		},
+		"brutescan": map[string]interface{}{
+			"enable": true, "services": []interface{}{}, "threads": 20, "timeout": 5,
+			"delayMs": 100, "stopOnFirst": true, "forceScan": false,
+		},
+		"pocscan": map[string]interface{}{
+			"enable": true, "mode": "auto", "useNuclei": true, "forceScan": false,
+			"autoScan": true, "automaticScan": true, "customOnly": false,
+			"severity": "critical,high,medium,low,info,unknown", "targetTimeout": 600,
+			"nucleiTemplateIds": []interface{}{}, "customPocIds": []interface{}{},
+			"customHeaders": []interface{}{}, "customPocOnly": false,
+		},
+		"dirscan": map[string]interface{}{
+			"enable": true, "dictIds": []interface{}{"69fd35207eaed2f49d40abec"},
+			"threads": 50, "timeout": 10, "followRedirect": true, "forceScan": false,
+			"autoCalibration": true, "filterSize": "", "filterWords": "",
+			"filterLines": "", "filterRegex": "", "matcherMode": "or", "filterMode": "or",
+			"rate": 0, "recursion": false, "recursionDepth": 2,
+		},
+		"jsfinder": map[string]interface{}{
+			"enable": true, "threads": 10, "timeout": 10, "forceScan": false,
+		},
+	}
+
 	return []model.ScanTemplate{
 		{
 			Name:        "快速扫描",
 			Description: "仅进行端口扫描和基础指纹识别，适合快速资产发现",
 			Category:    "quick",
 			Tags:        []string{"快速", "端口扫描"},
-			Config:      buildConfig(map[string]interface{}{"portscan": map[string]interface{}{"enable": true, "ports": "21,22,23,25,53,80,443,3306,3389,8080", "rate": 1000, "timeout": 3}, "fingerprint": map[string]interface{}{"enable": true}, "pocscan": map[string]interface{}{"enable": false}, "dirscan": map[string]interface{}{"enable": false}, "domainscan": map[string]interface{}{"enable": false}, "jsfinder": map[string]interface{}{"enable": false}}),
+			Config:      buildConfig(quickScanConfig),
 			IsBuiltin:   true,
 			SortNumber:  1,
 		},
 		{
 			Name:        "标准扫描",
-			Description: "端口扫描 + 指纹识别 + 漏洞扫描 + JS敏感信息与未授权检测，适合日常安全检测",
+			Description: "端口扫描 + 指纹识别 + 弱口令检测 + 漏洞扫描 + 目录扫描 + JS敏感信息与未授权检测，适合日常安全检测",
 			Category:    "standard",
 			Tags:        []string{"标准", "漏洞扫描", "JS审计"},
-			Config:      buildConfig(map[string]interface{}{"portscan": map[string]interface{}{"enable": true, "ports": "21,22,23,25,53,80,443,1433,3306,3389,5432,6379,8080,27017", "rate": 500, "timeout": 5}, "fingerprint": map[string]interface{}{"enable": true}, "pocscan": map[string]interface{}{"enable": true, "severity": "critical,high,medium"}, "dirscan": map[string]interface{}{"enable": false}, "domainscan": map[string]interface{}{"enable": false}, "jsfinder": map[string]interface{}{"enable": true, "threads": 10, "timeout": 10, "enableSourcemap": true, "enableUnauthCheck": true}}),
+			Config:      buildConfig(standardScanConfig),
 			IsBuiltin:   true,
 			SortNumber:  2,
 		},

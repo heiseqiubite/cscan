@@ -592,6 +592,8 @@ func (w *Worker) processTaskLoop() {
 			ctx := context.Background()
 			if ctrl := w.checkTaskControl(ctx, task.TaskId); ctrl == "STOP" {
 				w.taskLog(task.TaskId, LevelInfo, "Task %s skipped because it was stopped while waiting in queue", task.TaskId)
+				// 即使队列内被丢弃也要推动主任务计数，否则 sub_task_done 永远到不了 sub_task_count
+				w.incrSubTaskDone(ctx, task, "完成", true)
 				continue
 			}
 			w.logger.Info("processTaskLoop: calling executeTask for task %s", task.TaskId)
@@ -1072,6 +1074,17 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 		}
 	}()
 
+	// 兜底递增子任务计数器：无论正常完成、STOP、致命错误、panic，都让主任务计数推进，
+	// 避免任意早返回路径让主任务永远停留在 STARTED。PAUSE 信号下跳过，恢复后由新一轮执行递增。
+	// 此 defer 在 cleanup state defer 之后注册，按 LIFO 先执行，可在控制信号被清除前读取。
+	defer func() {
+		bgCtx := context.Background()
+		if ctrl := w.checkTaskControl(bgCtx, task.TaskId); ctrl == "PAUSE" {
+			return
+		}
+		w.incrSubTaskDone(bgCtx, task, "完成", true)
+	}()
+
 	// 检查是否有停止信号（任务可能在队列中被停止)
 	if ctrl := w.checkTaskControl(baseCtx, task.TaskId); ctrl == "STOP" {
 		w.taskLog(task.TaskId, LevelInfo, "Task %s was stopped before execution", task.TaskId)
@@ -1263,6 +1276,7 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 		}
 		if len(targets) == 0 {
 			w.taskLog(task.TaskId, LevelInfo, "All targets filtered by blacklist, marking task as complete")
+			// 显式递增计数器，确保 progress=100 与 status=SUCCESS 原子落盘，避免前端在两次写入之间看到 0%
 			w.incrSubTaskDone(ctx, task, "完成", true)
 			w.updateTaskStatus(ctx, task.TaskId, scheduler.TaskStatusSuccess, "All targets filtered by blacklist")
 			return
@@ -2460,12 +2474,13 @@ func (w *Worker) executeTask(task *scheduler.TaskInfo) {
 		} // 结束 len(allAssets) > 0 的 else 分支
 	}
 
-	// 子任务全部阶段完成，递增主任务计数器
-	w.incrSubTaskDone(ctx, task, "完成", true)
-
 	// 更新任务状态为完成
 	duration := time.Since(startTime).Seconds()
 	result := fmt.Sprintf("Assets:%d Vuls:%d Duration:%.0fs", len(allAssets), len(allVuls), duration)
+
+	// 显式递增计数器，确保 progress=100 与 status=SUCCESS 原子落盘，避免前端在两次写入之间看到 0%
+	// line 1078 的 defer 仍作兜底；IncrSubTaskDoneAtomic 的 $lt 过滤天然防重复递增
+	w.incrSubTaskDone(ctx, task, "完成", true)
 
 	w.updateTaskStatus(ctx, task.TaskId, scheduler.TaskStatusSuccess, result)
 	w.taskLog(task.TaskId, LevelInfo, "Completed: %s", result)
@@ -2627,18 +2642,32 @@ func (w *Worker) saveAssetResult(ctx context.Context, workspaceId, mainTaskId, o
 			httpAssets = append(httpAssets, httpAsset)
 		}
 
-		// 使用独立的超时上下文，每批30秒超时
-		batchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		resp, err := w.httpClient.SaveTaskResult(batchCtx, &TaskResultReq{
-			WorkspaceId: workspaceId,
-			MainTaskId:  mainTaskId,
-			Assets:      httpAssets,
-			OrgId:       orgId,
-		})
-		cancel()
+		// 失败时使用新 context 重试，避免共享父 ctx 已 cancel 导致重试无效
+		const maxBatchRetry = 3
+		var resp *TaskResultResp
+		var err error
+		for attempt := 1; attempt <= maxBatchRetry; attempt++ {
+			batchCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			resp, err = w.httpClient.SaveTaskResult(batchCtx, &TaskResultReq{
+				WorkspaceId: workspaceId,
+				MainTaskId:  mainTaskId,
+				Assets:      httpAssets,
+				OrgId:       orgId,
+			})
+			cancel()
+			if err == nil {
+				break
+			}
+			if attempt < maxBatchRetry {
+				w.taskLog(mainTaskId, LevelWarn, "Batch %d/%d save attempt %d/%d failed: %v",
+					batchIdx+1, totalBatches, attempt, maxBatchRetry, err)
+				time.Sleep(time.Duration(attempt*2) * time.Second)
+			}
+		}
 
 		if err != nil {
-			w.taskLog(mainTaskId, LevelError, "Batch %d/%d save failed: %v", batchIdx+1, totalBatches, err)
+			w.taskLog(mainTaskId, LevelError, "Batch %d/%d save failed after %d attempts: %v",
+				batchIdx+1, totalBatches, maxBatchRetry, err)
 		} else {
 			totalNew += resp.NewAsset
 			totalUpdate += resp.UpdateAsset
@@ -2746,7 +2775,7 @@ func (w *Worker) keepAliveLoop() {
 				w.logger.Warn("Heartbeat failed (%d/%d): %v", consecutiveFailures, maxFailures, err)
 
 				if consecutiveFailures >= maxFailures {
-					w.logger.Error("Heartbeat failed %d times consecutively, worker may be marked offline", maxFailures)
+					w.logger.Warn("Heartbeat failed %d times consecutively, worker may be marked offline", maxFailures)
 					// 不主动退出，继续尝试，让服务端决定是否标记离线
 				}
 			} else {

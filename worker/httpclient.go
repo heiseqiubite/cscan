@@ -27,7 +27,7 @@ func NewWorkerHTTPClient(baseURL, installKey, workerName string) *WorkerHTTPClie
 		installKey: installKey,
 		workerName: workerName,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 120 * time.Second,
 		},
 	}
 }
@@ -384,7 +384,9 @@ func isRetryableError(err error) bool {
 		contains(errStr, "timeout") ||
 		contains(errStr, "no such host") ||
 		contains(errStr, "network is unreachable") ||
-		contains(errStr, "i/o timeout")
+		contains(errStr, "i/o timeout") ||
+		contains(errStr, "deadline exceeded") ||
+		contains(errStr, "EOF")
 }
 
 // contains 检查字符串是否包含子串（不区分大小写）

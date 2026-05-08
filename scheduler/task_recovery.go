@@ -177,9 +177,9 @@ func (m *TaskRecoveryManager) recoverTask(taskId string, execInfo *TaskExecution
 		return
 	}
 
-	// 根据任务类型选择队列
+	// 根据任务类型选择队列：原指定 Worker 离线时回退到公共队列，避免任务沉淀在已死亡 Worker 的专属队列
 	var queueKey string
-	if len(taskInfo.Workers) > 0 {
+	if len(taskInfo.Workers) > 0 && m.isWorkerOnline(taskInfo.Workers[0]) {
 		queueKey = fmt.Sprintf("cscan:task:queue:worker:%s", taskInfo.Workers[0])
 	} else {
 		queueKey = m.queueKey
